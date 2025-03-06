@@ -1,0 +1,15 @@
+# PyTorch分类器参数规范
+metadata:
+  framework: pytorch
+  task: classification
+
+parameters:
+  required:  # 必须提供的参数
+    - model
+    - loss
+    - optimizer
+  optional:   # 可选参数及默认值
+    clip_values: [0.0, 1.0]
+    input_shape: [3, 224, 224]
+    device: "auto"
+    device_type: "auto"

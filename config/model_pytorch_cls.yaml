@@ -1,0 +1,12 @@
+# PyTorch分类器配置
+framework: "pytorch"
+task: "classification"
+model_path: "model/net/cifar10.py"
+weight_path: "model/weight/cifar_50.pth"
+loss: "CrossEntropyLoss"
+optimizer: "Adam"
+input_shape: [3, 32, 32]
+device: "cuda"
+num_classes: 10
+device_type: "gpu"
+model_name: "Tudui"
