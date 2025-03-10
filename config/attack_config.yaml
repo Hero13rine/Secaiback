@@ -1,4 +1,0 @@
-attack:
-  name: "fgsm"
-  params:
-    eps: 0.03
