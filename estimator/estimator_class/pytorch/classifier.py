@@ -11,12 +11,17 @@ class PyTorchClassificationWrapper(BaseEstimator):
     def __init__(self,
                  model: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
-                 loss=torch.nn.CrossEntropyLoss(),
-                 device="auto",
-                 input_shape=(3, 224, 224),
-                 num_classes=10,
-                 clip_values=(0, 1),
-                 device_type="auto"):
+                 loss,
+                 input_shape,
+                 nb_classes,
+                 clip_values,
+                 use_amp,
+                 opt_level,
+                 loss_scale,
+                 channels_first,
+                 device_type,
+                 device
+                 ):
         # 设备自动检测
         if device == "auto":
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -30,10 +35,14 @@ class PyTorchClassificationWrapper(BaseEstimator):
             model=model.to(device),
             loss=loss,
             optimizer=optimizer,
-            clip_values=clip_values,
             input_shape=input_shape,
+            nb_classes=nb_classes,
+            clip_values=clip_values,
+            use_amp=use_amp,
+            opt_level=opt_level,
+            loss_scale=loss_scale,
+            channels_first=channels_first,
             device_type=device_type,
-            nb_classes=num_classes
         )
 
     def predict(self, x):

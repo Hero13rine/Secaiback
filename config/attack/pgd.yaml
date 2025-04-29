@@ -1,0 +1,14 @@
+parameters:
+  required:  # 必须提供的参数
+  optional:   # 可选参数及默认值
+    norm: "inf"
+    eps: 0.3
+    eps_step: 0.1
+    decay: null
+    max_iter: 100
+    targeted: False
+    num_random_init: 0
+    batch_size: 32
+    random_eps: False
+    summary_writer: False
+    verbose: True

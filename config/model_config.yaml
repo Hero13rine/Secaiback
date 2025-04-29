@@ -1,6 +1,0 @@
-model:
-  name: "Tudui"
-  input_shape: [3, 32, 32]  # CIFAR-10为3通道32x32
-  num_classes: 10
-  weight_path: "./model/weight/cifar_50.pth"
-  class: PytorchClassifier

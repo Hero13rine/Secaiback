@@ -1,5 +1,0 @@
-model:
-  config_path: "config/model_pytorch_cls.yaml"
-
-attack:
-  config_path: "config/attack_config.yaml"

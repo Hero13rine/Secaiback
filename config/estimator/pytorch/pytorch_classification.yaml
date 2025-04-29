@@ -1,0 +1,17 @@
+# PyTorch分类器参数规范
+metadata:
+  framework: pytorch
+  task: classification
+
+parameters:
+  required:  # 必须提供的参数
+    - input_shape
+    - nb_classes
+    - clip_values
+  optional:   # 可选参数及默认值
+    use_amp: False
+    opt_level: "O1"
+    loss_scale: "dynamic"
+    channels_first: True
+    device_type: "gpu"
+    device: "auto"

@@ -5,11 +5,31 @@ from attack.attack_factory import AttackFactory
 
 @AttackFactory.register("pgd")
 class PGDAttack:
-    def __init__(self, estimator, eps=0.3, max_iter=10):
+    def __init__(self, estimator,
+                 norm,
+                 eps,
+                 eps_step,
+                 decay,
+                 max_iter,
+                 targeted,
+                 num_random_init,
+                 batch_size,
+                 random_eps,
+                 summary_writer,
+                 verbose):
         self.attack = ProjectedGradientDescent(
             estimator=estimator,
+            norm=norm,
             eps=eps,
-            max_iter=max_iter
+            eps_step=eps_step,
+            decay=decay,
+            max_iter=max_iter,
+            targeted=targeted,
+            num_random_init=num_random_init,
+            batch_size=batch_size,
+            random_eps=random_eps,
+            summary_writer=summary_writer,
+            verbose=verbose
         )
 
     def generate(self, x):
