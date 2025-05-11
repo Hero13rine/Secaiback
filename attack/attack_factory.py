@@ -1,4 +1,5 @@
 import inspect
+import os
 
 import yaml
 
@@ -9,8 +10,12 @@ class AttackFactory:
 
     @classmethod
     def load_schema(cls, method: str):
+        # 获取当前脚本所在的绝对路径（假设当前脚本在项目内的任意位置）
+        current_script_path = os.path.abspath(__file__)
+        # 项目根目录：假设根目录是当前脚本的上两级目录（根据实际目录结构调整，比如 `os.path.dirname(os.path.dirname(...))`）
+        project_root = os.path.dirname(os.path.dirname(current_script_path))
         """加载参数校验模板"""
-        schema_path = f"config/attack/{method}.yaml"
+        schema_path = project_root + f"/config/attack/{method}.yaml"
         with open(schema_path) as f:
             schema = yaml.safe_load(f)
             key = f"{method}"
