@@ -10,7 +10,7 @@ from estimator import EstimatorFactory
 from method import evaluate, load_config
 from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
-from load_dataset import load_cifar
+from load_dataset import load_data
 from attack import AttackFactory
 
 
@@ -56,7 +56,7 @@ def main():
     )
 
     # 6.加载数据
-    test_loader = load_cifar()
+    test_loader = load_data()
 
     # 7.进行评估
     evaluate(test_loader, estimator, attack)
