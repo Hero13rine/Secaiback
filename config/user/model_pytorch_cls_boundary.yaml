@@ -1,0 +1,19 @@
+# PyTorch分类器配置
+model:
+  instantiation:
+    model_path: "model/net/cifar10.py"
+    weight_path: "model/weight/cifar_50.pth"
+    model_name: "Tudui"
+    parameters:
+  estimator:
+    framework: "pytorch"
+    task: "classification"
+    parameters:
+      input_shape: [3, 32, 32]
+      nb_classes: 10
+      clip_values: [0,1]
+      device: "cuda"
+      device_type: "gpu"
+attack:
+  method: "boundary"
+  parameters: {}

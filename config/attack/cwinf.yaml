@@ -1,0 +1,12 @@
+parameters:
+  required:  # 必须提供的参数
+  optional:   # 可选参数及默认值
+    confidence: 0.0
+    targeted: False
+    learning_rate: 0.01
+    decrease_factor: 0.9
+    initial_const: 0.00001
+    largest_const: 20.0
+    const_factor: 2.0
+    batch_size: 1
+    verbose: True

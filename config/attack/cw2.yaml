@@ -1,0 +1,13 @@
+parameters:
+  required:  # 必须提供的参数
+  optional:   # 可选参数及默认值
+    confidence: 0.0
+    targeted: False
+    learning_rate: 0.01
+    binary_search_steps: 10
+    max_iter: 10
+    initial_const: 0.01
+    max_halving: 5
+    max_doubling: 5
+    batch_size: 1
+    verbose: True
