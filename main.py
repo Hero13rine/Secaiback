@@ -1,8 +1,9 @@
 import torch
+from art.utils import load_cifar10
 from torch import optim
 
 from estimator import EstimatorFactory
-from method import evaluate, load_config
+from method import evaluate, load_config, evaluate_robustness
 from model import load_model
 from data.load_dataset import load_cifar
 from attack import AttackFactory
@@ -11,7 +12,8 @@ from attack import AttackFactory
 def main():
 
     # 1.加载配置文件
-    user_config = load_config("config/user/model_pytorch_cls.yaml")
+    user_config = load_config("config/user/model_pytorch_cls_cw.yaml")
+    # user_config = load_config("config/user/java_generate_test.yaml")
     model_instantiation_config = user_config["model"]["instantiation"]
     model_estimator_config = user_config["model"]["estimator"]
     attack_config = user_config["attack"]
@@ -43,7 +45,7 @@ def main():
     test_loader = load_cifar()
 
     # 7.进行评估
-    evaluate(test_loader, estimator, attack)
+    evaluate_robustness(test_loader, estimator, attack)
 
 
 if __name__ == "__main__":
