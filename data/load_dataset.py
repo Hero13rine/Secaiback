@@ -20,6 +20,8 @@ def load_cifar(batch_size=64):
     # CIFAR-10专用归一化参数
     transform = transforms.Compose([
         transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465),
+                             (0.247, 0.243, 0.261))
     ])
 
     test_set = datasets.CIFAR10(
