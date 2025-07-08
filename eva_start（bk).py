@@ -1,26 +1,25 @@
 import os
-import sys
+import pymysql
 
 import torch
 from torch import optim
-
-from metric.basic.basic import cal_basic
-from metric.interpretability.shap.GradientShap import GradientShap
-from utils.SecAISender import ResultSender
-
+import sys
 # 将目标路径添加到系统路径
 sys.path.append('/app/userData/modelData/')
-sys.path.append('/app/systemData/database_code/')
-from update_table import update
 
 from estimator import EstimatorFactory
 from method import evaluate, load_config
 from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
 from load_dataset import load_data
+sys.path.append('/app/systemData/database_code/')
+from update_table import update
+
 from attack import AttackFactory
 
 
+
+# 实验os.path.abspath解决远程调用python项目路径问题
 def main():
 
     # 0.0获取当前 Pod 名称
@@ -38,12 +37,10 @@ def main():
     model_instantiation_config = user_config["model"]["instantiation"]
     model_estimator_config = user_config["model"]["estimator"]
     attack_config = user_config["attack"]
-    ResultSender.send_log("进度", "配置文件已加载完毕")
 
     # 2.初始化模型
     model = load_model(model_instantiation_config["model_path"], model_instantiation_config["model_name"]
                        , model_instantiation_config["weight_path"], model_instantiation_config["parameters"])
-    ResultSender.send_log("进度", "模型初始化完成")
 
     # 3.获取优化器和损失函数
     optimizer = optim.Adam(model.parameters(), lr=0.01)
@@ -56,35 +53,24 @@ def main():
         optimizer=optimizer,
         config=model_estimator_config
     )
-    ResultSender.send_log("进度", "估计器已生成")
 
-    # 5.加载数据
+
+    # 5.生成攻击对象
+    attack = AttackFactory.create(
+        estimator=estimator.get_core(),
+        config=attack_config
+    )
+
+    # 6.加载数据
     test_loader = load_data()
-    ResultSender.send_log("进度", "数据集已加载")
 
-    # 6.根据传入的评测类型进行评测
-    if attack_config["method"] in ["accuracy", "precision", "recall", "f1score"]:
-        cal_basic(estimator, test_loader, attack_config["method"])
-    elif attack_config["method"] in ["fgsm", "pgd"]:
-        # 生成攻击对象
-        attack = AttackFactory.create(
-            estimator=estimator.get_core(),
-            config=attack_config
-        )
-        ResultSender.send_log("进度", "攻击对象已生成")
-        evaluate(test_loader, estimator, attack)
-        # 进行评估
-        acc_clean, acc_adv = evaluate(test_loader, estimator, attack) 
-        # 更新数据库
-        update(acc_clean, acc_adv)
-        print("okok")
-    elif attack_config["method"] in ["shap"]:
-        GradientShap(model, test_loader)
+    # 7.进行评估
+    acc_clean, acc_adv = evaluate(test_loader, estimator, attack)
+    
+    # 8.更新数据库
+    update(acc_clean, acc_adv)
+    print("okok")
 
-    ResultSender.send_log("进度", "评测结束")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        ResultSender.send_log("错误", str(e))
+    main()
