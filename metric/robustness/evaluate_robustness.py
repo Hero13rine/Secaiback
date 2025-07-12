@@ -138,13 +138,13 @@ def evaluate_robustness_adv_all(test_loader, estimator, metrics):
     if "adverr" in metrics:
         print(f"adverr: {sum(all_results['adverr'])/len(all_results['adverr'])}")
         ResultSender.send_result("adverr", sum(all_results['adverr'])/len(all_results['adverr']))
-    elif "advacc" in metrics:
+    if "advacc" in metrics:
         print(f"advacc: {sum(all_results['advacc']) / len(all_results['advacc'])}")
         ResultSender.send_result("advacc", sum(all_results['advacc']) / len(all_results['advacc']))
-    elif "actc" in metrics:
+    if "actc" in metrics:
         print(f"actc: {sum(all_results['actc']) / len(all_results['actc'])}")
         ResultSender.send_result("actc", sum(all_results['actc']) / len(all_results['actc']))
-    elif "acac" in metrics:
+    if "acac" in metrics:
         print(f"acac: {sum(all_results['acac']) / len(all_results['acac'])}")
         ResultSender.send_result("acac", sum(all_results['acac']) / len(all_results['acac']))
 
@@ -224,7 +224,7 @@ def evaluate_robustness_corruptions(test_loader, estimator, metrics):
     print(f"mCE of the network on the test images: {mCE:.2f}%")
     if "mce" in metrics:
         ResultSender.send_result("mce", mCE)
-    elif "rmce" in metrics:
+    if "rmce" in metrics:
         err_clean = evaluate_clean(test_loader, estimator)
         RmCE = mCE - err_clean
         print(f"RmCE of the network on the test images: {RmCE:.2f}%")
