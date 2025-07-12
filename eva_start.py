@@ -7,6 +7,7 @@ from torch import optim
 from metric.basic.basic import cal_basic
 from metric.interpretability.shap.GradientShap import GradientShap
 from utils.SecAISender import ResultSender
+from metric.robustness.evaluate_robustness import evaluation_robustness
 
 # 将目标路径添加到系统路径
 sys.path.append('/app/userData/modelData/')
@@ -24,20 +25,20 @@ from attack import AttackFactory
 def main():
 
     # 0.0获取当前 Pod 名称
-    pod_name = os.getenv('HOSTNAME')  # 获取 Pod 名称（例如: 1242343443-1880539772613976065-adversarialattack）
+    pod_name = os.getenv('HOSTNAME')  # 获取 Pod 名称（例如: 1242343443-1880539772613976065-basic）
 
     # 0.1从 Pod 名称中提取信息
     parts = pod_name.split('-')  # 根据 '-' 分割名称
     user_id = parts[0]  # 第一部分是用户ID
     model_id = parts[1]  # 第二部分是模型ID
-    attack_type = parts[2]  # 第三部分是评测类型，如 "backdoorAttack" 或 "adversarialAttack"
-    evaluation_path = "/app/userData/modelData/evaluationConfigs/" + attack_type + ".yaml"
+    evaluation_type = parts[2]  # 第三部分是评测维度，如"basic"，"robustness"
+    evaluation_path = "/app/userData/modelData/evaluationConfigs/" + "evaluationConfig" + ".yaml"
 
     # 1.加载配置文件
     user_config = load_config(evaluation_path)
     model_instantiation_config = user_config["model"]["instantiation"]
     model_estimator_config = user_config["model"]["estimator"]
-    attack_config = user_config["attack"]
+    evaluation_config = user_config["evaluation"]
     ResultSender.send_log("进度", "配置文件已加载完毕")
 
     # 2.初始化模型
@@ -63,22 +64,11 @@ def main():
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
-    if attack_config["method"] in ["accuracy", "precision", "recall", "f1score"]:
-        cal_basic(estimator, test_loader, attack_config["method"])
-    elif attack_config["method"] in ["fgsm", "pgd"]:
-        # 生成攻击对象
-        attack = AttackFactory.create(
-            estimator=estimator.get_core(),
-            config=attack_config
-        )
-        ResultSender.send_log("进度", "攻击对象已生成")
-        evaluate(test_loader, estimator, attack)
-        # 进行评估
-        acc_clean, acc_adv = evaluate(test_loader, estimator, attack) 
-        # 更新数据库
-        update(acc_clean, acc_adv)
-        print("okok")
-    elif attack_config["method"] in ["shap"]:
+    if evaluation_type == "basic":
+        cal_basic(estimator, test_loader, evaluation_config["basic"])
+    elif evaluation_type == "robustness":
+        evaluation_robustness(estimator, test_loader, evaluation_config["robustness"])
+    elif evaluation_type == "shap":
         GradientShap(model, test_loader)
 
     ResultSender.send_log("进度", "评测结束")

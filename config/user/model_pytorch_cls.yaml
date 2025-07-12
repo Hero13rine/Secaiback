@@ -1,9 +1,9 @@
 # PyTorch分类器配置
 model:
   instantiation:
-    model_path: "model/net/cifar10.py"
-    weight_path: "model/weight/cifar_50.pth"
-    model_name: "Tudui"
+    model_path: "model/net/ResNet.py"
+    weight_path: "model/weight/resnet18_cifar10.pt"
+    model_name: "ResNet18"
     parameters:
   estimator:
     framework: "pytorch"
@@ -14,7 +14,12 @@ model:
       clip_values: [0,1]
       device: "cuda"
       device_type: "gpu"
-attack:
-  method: "fgsm"
-  parameters:
-    eps: 0.4
+evaluation:
+  basic: ["accuracy",'precision']
+  robustness:
+    adversarial: ["advacc","adverr","acac"]
+    corruption: ["rmce"]
+  interpretability: ["shap"]
+  safety: []
+  generalization: []
+  fairness: []

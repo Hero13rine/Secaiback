@@ -2,6 +2,8 @@
 import numpy as np
 import torch
 from torchvision import transforms
+
+from attack import AttackFactory
 from utils.SecAISender import ResultSender
 
 from method.corruptions import (
@@ -10,21 +12,26 @@ from method.corruptions import (
     fog, frost, snow, spatter, contrast, brightness, saturate,
     jpeg_compression, pixelate, elastic_transform
 )
+
+
 # 定义softmax函数
 def softmax(x):
     exp_x = np.exp(x - np.max(x, axis=1, keepdims=True))
     return exp_x / np.sum(exp_x, axis=1, keepdims=True)
 
 
-def evaluation_robustness(test_loader, estimator, attack):
-    ResultSender.send_log("进度","鲁棒性评测开始")
-    evaluate_robustness_adv(test_loader, estimator, attack)
-    evaluate_robustness_corruptions(test_loader, estimator)
+def evaluation_robustness(test_loader, estimator, metrics):
+    ResultSender.send_log("进度", "鲁棒性评测开始")
+    print("鲁棒性评测开始")
+    metrics_adv = metrics["adversarial"]
+    if len(metrics_adv) > 0:
+        evaluate_robustness_adv_all(test_loader, estimator, metrics_adv)
+    metrics_cor = metrics["corruption"]
+    if len(metrics_cor) > 0:
+        evaluate_robustness_corruptions(test_loader, estimator, metrics_cor)
 
 
 def evaluate_robustness_adv(test_loader, estimator, attack):
-    ResultSender.send_log("进度","对抗攻击评测开始")
-    total_correct_clean = 0
     total_uncorrect_adv = 0
     total_samples = 0
     successful_attack_confidences = []  # 用于存储攻击成功样本的真实类别置信度
@@ -34,16 +41,8 @@ def evaluate_robustness_adv(test_loader, estimator, attack):
         x_batch_np = x_batch.numpy().astype(np.float32)
         y_batch_np = y_batch.numpy()
 
-        # 原始预测
-        pred_clean = estimator.predict(x_batch_np)
-
-        # 对原始预测进行softmax归一化
-        pred_clean_probs = softmax(pred_clean)
-        total_correct_clean += np.sum(np.argmax(pred_clean_probs, axis=1) == y_batch_np)
-
         # 生成对抗样本
         x_adv_np = attack.generate(x_batch_np)
-        # print(x_adv_np.dtype)
 
         # 对抗样本预测
         pred_adv = estimator.predict(x_adv_np)
@@ -67,34 +66,87 @@ def evaluate_robustness_adv(test_loader, estimator, attack):
         total_samples += len(y_batch)
 
     # 计算整体准确率
-    acc_clean = total_correct_clean / total_samples
-    ASR = total_uncorrect_adv / total_samples
-    ResultSender.send_result("acc_clean",acc_clean)
-    ResultSender.send_result("ASR", ASR)
-    print(f"Clean accuracy (full test set): {acc_clean:.2%}")
-    print(f"Attack accuracy (full test set): {ASR:.2%}")
+    adverr = total_uncorrect_adv / total_samples
+    advacc = 1 - adverr
+    # ResultSender.send_result("adverr",adverr)
+    # ResultSender.send_result("advacc", advacc)
+    print(f"Adversarial  dataset accuracy (full test set): {advacc:.2%}")
+    print(f"Adversarial  dataset error (full test set): {adverr:.2%}")
 
     # 计算ACTC
     if len(successful_attack_confidences) > 0:
         actc = np.mean(successful_attack_confidences)
-        ResultSender.send_result("ACTC", actc)
-        print(f"ACTC (Average Confidence of True Class): {actc:.4f}")
+        # ResultSender.send_result("actc", actc)
+        print(f"actc (Average Confidence of True Class): {actc:.4f}")
     else:
-        ResultSender.send_log("异常", "No successful attacks found. ACTC cannot be calculated.")
-        print("No successful attacks found. ACTC cannot be calculated.")
+        ResultSender.send_log("异常", "No successful attacks found. actc cannot be calculated.")
+        print("No successful attacks found. actc cannot be calculated.")
         actc = None
 
     # 计算ACAC
     if len(acac_confidences) > 0:
         acac = np.mean(acac_confidences)
-        ResultSender.send_result("ACAC", acac)
-        print(f"ACAC (Average Confidence of Adversarial Class): {acac:.4f}")
+        # ResultSender.send_result("acac", acac)
+        print(f"acac (Average Confidence of Adversarial Class): {acac:.4f}")
     else:
-        ResultSender.send_log("异常", "No successful attacks found. ACAC cannot be calculated.")
-        print("No successful attacks found. ACAC cannot be calculated.")
+        # ResultSender.send_log("异常", "No successful attacks found. acac cannot be calculated.")
+        print("No successful attacks found. acac cannot be calculated.")
         acac = None
 
-    return acc_clean, ASR, actc, acac
+    return adverr, advacc, actc, acac
+
+
+def parse_attack_method(attack_str):
+    """将攻击方法字符串解析为包含方法和参数的字典"""
+    return {
+        "method": attack_str,
+        "parameters": {
+            "eps": 0.4
+        }
+    }
+
+
+def evaluate_robustness_adv_all(test_loader, estimator, metrics):
+    ResultSender.send_log("进度", "对抗攻击评测开始")
+    # attack_method = ["fgsm","pgd","cw0"]
+    attack_method = ["fgsm"]
+
+    # 存储所有攻击方法的结果
+    all_results = {
+        'adverr': [],
+        'advacc': [],
+        'actc': [],
+        'acac': []
+    }
+
+    # 对每种攻击方法进行评估
+    for attack_name in attack_method:
+        attack_config = parse_attack_method(attack_name)
+        attack = AttackFactory.create(
+            estimator=estimator.get_core(),
+            config=attack_config
+        )
+        adverr, advacc, actc, acac = evaluate_robustness_adv(test_loader, estimator, attack)
+
+        # 收集每种攻击方法的结果
+        all_results['adverr'].append(adverr)
+        all_results['advacc'].append(advacc)
+        all_results['actc'].append(actc)
+        all_results['acac'].append(acac)
+
+    # 计算所有指标的平均值
+    if "adverr" in metrics:
+        print(f"adverr: {sum(all_results['adverr'])/len(all_results['adverr'])}")
+        ResultSender.send_result("adverr", sum(all_results['adverr'])/len(all_results['adverr']))
+    elif "advacc" in metrics:
+        print(f"advacc: {sum(all_results['advacc']) / len(all_results['advacc'])}")
+        ResultSender.send_result("advacc", sum(all_results['advacc']) / len(all_results['advacc']))
+    elif "actc" in metrics:
+        print(f"actc: {sum(all_results['actc']) / len(all_results['actc'])}")
+        ResultSender.send_result("actc", sum(all_results['actc']) / len(all_results['actc']))
+    elif "acac" in metrics:
+        print(f"acac: {sum(all_results['acac']) / len(all_results['acac'])}")
+        ResultSender.send_result("acac", sum(all_results['acac']) / len(all_results['acac']))
 
 
 def evaluate_clean(test_loader, estimator):
@@ -116,14 +168,12 @@ def evaluate_clean(test_loader, estimator):
 
     # 计算整体准确率
     err_clean = 100 * total_correct_clean / total_samples
-    ResultSender.send_result("err_clean", err_clean)
     print(f"asr_clean (full test set): {err_clean:.2f}%")
-
     return err_clean
 
 
-def evaluate_robustness_corruptions(test_loader, estimator):
-    ResultSender.send_log("进度","扰动攻击评测开始")
+def evaluate_robustness_corruptions(test_loader, estimator, metrics):
+    ResultSender.send_log("进度", "扰动攻击评测开始")
     # 定义所有扰动方法
     corruption_functions = [
         gaussian_noise, shot_noise, impulse_noise, speckle_noise,
@@ -161,19 +211,21 @@ def evaluate_robustness_corruptions(test_loader, estimator):
                         total += 1
                         un_correct += (predicted[0] != labels[i].item())
             err_corruption = 100 * un_correct / total
-            ResultSender.send_log("进度",  f"UnCorrectNum of the network on the test images with {corruption_function.__name__}_{severity}: {un_correct}")
             ResultSender.send_log("进度",
-                                   f"ASR of the network on the test images with {corruption_function.__name__}_{severity}: {err_corruption:.2f}%")
+                                  f"UnCorrectNum of the network on the test images with {corruption_function.__name__}_{severity}: {un_correct}")
+            ResultSender.send_log("进度",
+                                  f"ASR of the network on the test images with {corruption_function.__name__}_{severity}: {err_corruption:.2f}%")
             print(
                 f"UnCorrectNum of the network on the test images with {corruption_function.__name__}_{severity}: {un_correct}")
             print(
                 f"ASR of the network on the test images with {corruption_function.__name__}_{severity}: {err_corruption:.2f}%")
             asr_total += err_corruption
     mCE = asr_total / (len(corruption_functions) * len(severity_levels))
-    ResultSender.send_result("mCE", mCE)
     print(f"mCE of the network on the test images: {mCE:.2f}%")
-    err_clean = evaluate_clean(test_loader, estimator)
-    RmCE = mCE - err_clean
-    ResultSender.send_result("RmCE", RmCE)
-    print(f"RmCE of the network on the test images: {RmCE:.2f}%")
-    return mCE, RmCE
+    if "mce" in metrics:
+        ResultSender.send_result("mce", mCE)
+    elif "rmce" in metrics:
+        err_clean = evaluate_clean(test_loader, estimator)
+        RmCE = mCE - err_clean
+        print(f"RmCE of the network on the test images: {RmCE:.2f}%")
+        ResultSender.send_result("rmce", RmCE)

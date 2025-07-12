@@ -1,2 +1,2 @@
-from .evaluate import evaluate, evaluate_robustness_adv, evaluation_robustness, evaluate_clean, evaluate_robustness_corruptions
+from .evaluate import evaluate, evaluate_robustness_adv, evaluation_robustness, evaluate_clean, evaluate_robustness_corruptions,evaluate_robustness_adv_all
 from .load_config import load_config
