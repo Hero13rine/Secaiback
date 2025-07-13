@@ -19,7 +19,8 @@ def cal_basic(estimator, test_loader, metrics):
             all_labels.extend(labels)
 
         ResultSender.send_log("进度", "网络输出收集完成")
-        ResultSender.send_log("进度", "开始计算"+metrics)
+        ResultSender.send_log("进度", "开始计算"+str(metrics.get('performance_testing', [])))
+        metrics=metrics.get('performance_testing', [])
 
         report = classification_report(all_labels, all_preds, output_dict=True, zero_division=0)
         # 计算基础指标
