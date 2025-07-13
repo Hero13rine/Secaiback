@@ -23,12 +23,18 @@ def softmax(x):
 def evaluation_robustness(test_loader, estimator, metrics):
     ResultSender.send_log("进度", "鲁棒性评测开始")
     print("鲁棒性评测开始")
-    metrics_adv = metrics["adversarial"]
-    if len(metrics_adv) > 0:
-        evaluate_robustness_adv_all(test_loader, estimator, metrics_adv)
-    metrics_cor = metrics["corruption"]
-    if len(metrics_cor) > 0:
-        evaluate_robustness_corruptions(test_loader, estimator, metrics_cor)
+    try:
+        metrics_adv = metrics["adversarial"]
+        if len(metrics_adv) > 0:
+            evaluate_robustness_adv_all(test_loader, estimator, metrics_adv)
+        metrics_cor = metrics["corruption"]
+        if len(metrics_cor) > 0:
+            evaluate_robustness_corruptions(test_loader, estimator, metrics_cor)
+        ResultSender.send_status("成功")
+        ResultSender.send_log("进度", "评测结果已写回数据库")
+    except Exception as e:
+        ResultSender.send_status("失败")
+        ResultSender.send_log("错误", str(e))
 
 
 def evaluate_robustness_adv(test_loader, estimator, attack):
