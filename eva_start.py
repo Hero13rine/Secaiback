@@ -67,7 +67,7 @@ def main():
     if evaluation_type == "basic":
         cal_basic(estimator, test_loader, evaluation_config["basic"])
     elif evaluation_type == "robustness":
-        evaluation_robustness(estimator, test_loader, evaluation_config["robustness"])
+        evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
     elif evaluation_type == "shap":
         GradientShap(model, test_loader)
 
