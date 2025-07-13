@@ -143,16 +143,16 @@ def evaluate_robustness_adv_all(test_loader, estimator, metrics):
     # 计算所有指标的平均值
     if "adverr" in metrics:
         print(f"adverr: {sum(all_results['adverr'])/len(all_results['adverr'])}")
-        ResultSender.send_result("adverr", sum(all_results['adverr'])/len(all_results['adverr']))
+        ResultSender.send_result("adverr", f"{(sum(all_results['adverr'])/len(all_results['adverr'])):.4f}")
     if "advacc" in metrics:
         print(f"advacc: {sum(all_results['advacc']) / len(all_results['advacc'])}")
-        ResultSender.send_result("advacc", sum(all_results['advacc']) / len(all_results['advacc']))
+        ResultSender.send_result("advacc", f"{(sum(all_results['advacc']) / len(all_results['advacc'])):.4f}")
     if "actc" in metrics:
         print(f"actc: {sum(all_results['actc']) / len(all_results['actc'])}")
-        ResultSender.send_result("actc", sum(all_results['actc']) / len(all_results['actc']))
+        ResultSender.send_result("actc", f"{(sum(all_results['actc']) / len(all_results['actc'])):.4f}")
     if "acac" in metrics:
         print(f"acac: {sum(all_results['acac']) / len(all_results['acac'])}")
-        ResultSender.send_result("acac", sum(all_results['acac']) / len(all_results['acac']))
+        ResultSender.send_result("acac", f"{(sum(all_results['acac']) / len(all_results['acac'])):.4f}")
 
 
 def evaluate_clean(test_loader, estimator):
@@ -228,10 +228,10 @@ def evaluate_robustness_corruptions(test_loader, estimator, metrics):
             asr_total += err_corruption
     mCE = asr_total / (len(corruption_functions) * len(severity_levels))
     print(f"mCE of the network on the test images: {mCE:.2f}%")
-    if "mce" in metrics:
-        ResultSender.send_result("mce", mCE)
-    if "rmce" in metrics:
+    if "mCE" in metrics:
+        ResultSender.send_result("mCE", f"{(mCE / 100) :.4f}")
+    if "RmCE" in metrics:
         err_clean = evaluate_clean(test_loader, estimator)
         RmCE = mCE - err_clean
         print(f"RmCE of the network on the test images: {RmCE:.2f}%")
-        ResultSender.send_result("rmce", RmCE)
+        ResultSender.send_result("RmCE",  f"{(RmCE / 100) :.4f}")

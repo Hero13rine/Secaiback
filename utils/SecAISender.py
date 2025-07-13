@@ -10,6 +10,7 @@ class ResultSender:
     containerName = os.getenv("containerName")
     evaluateDimension = os.getenv("evaluateDimension")
     evaluateMetric = os.getenv("evaluateMetric")
+    evaluationType = os.getenv("evaluationType")
     logUrl = os.getenv("logUrl")
     resultUrl = os.getenv("resultUrl")
     resultColumn = os.getenv("resultColumn")
@@ -71,7 +72,7 @@ class ResultSender:
         """
         data = {
             "modelId": ResultSender.modelId,
-            "metric": ResultSender.evaluateMetric,
+            "metric": ResultSender.evaluationType,
             "status": status
         }
 
