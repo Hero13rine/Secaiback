@@ -2,10 +2,13 @@ import os
 import sys
 
 import torch
+from art.utils import load_cifar10
 from torch import optim
 
+from data.load_dataset import load_cifar_train_test
 from metric.basic.basic import cal_basic
 from metric.interpretability.shap.GradientShap import GradientShap
+from metric.safety.membershipinference.evaluate_mia import evaluate_mia
 from utils.SecAISender import ResultSender
 from metric.robustness.evaluate_robustness import evaluation_robustness
 
@@ -70,6 +73,9 @@ def main():
         evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
     elif evaluation_type == "shap":
         GradientShap(model, test_loader)
+    elif evaluation_type == "safety":
+        train_loader, test_loader = load_cifar_train_test()
+        evaluate_mia(train_loader, test_loader, estimator, evaluation_config["safety"])
 
     ResultSender.send_log("进度", "评测结束")
 

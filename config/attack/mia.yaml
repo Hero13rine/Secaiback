@@ -1,0 +1,10 @@
+parameters:
+  required:
+  optional:
+    attack_model_type: "nn"  # 默认使用神经网络作为攻击模型
+    targeted_fpr: 0.01       # 默认目标FPR为1%
+    batch_size: 16
+    input_type: "prediction"
+    scaler_type: "standard"
+    nn_model_epochs: 100
+    nn_model_learning_rate: 0.0001
