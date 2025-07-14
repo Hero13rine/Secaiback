@@ -20,6 +20,7 @@ evaluation:
     adversarial: ["advacc","adverr","acac"]
     corruption: ["rmce"]
   interpretability: ["shap"]
-  safety: ["auc","TPR@FPR=0.1%","attack_average_precision"]
+  safety:
+    membership_inference: ["auc","TPR@FPR=0.1%","attack_average_precision"]
   generalization: []
   fairness: []

@@ -75,7 +75,7 @@ def main():
         GradientShap(model, test_loader)
     elif evaluation_type == "safety":
         train_loader, test_loader = load_cifar_train_test()
-        evaluate_mia(train_loader, test_loader, estimator, evaluation_config["safety"])
+        evaluate_mia(train_loader, test_loader, estimator, evaluation_config["safety"]["membership_inference"])
 
     ResultSender.send_log("进度", "评测结束")
 
