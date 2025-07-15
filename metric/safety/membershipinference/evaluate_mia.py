@@ -112,7 +112,7 @@ def evaluate_mia(
             ResultSender.send_result("attack_average_precision", ap_score)
 
         # 只保留TPR@FPR=0.1%的计算
-        if 'TPR@FPR=0.1%' in safety_metrics:
+        if 'tpr_at_fpr' in safety_metrics:
             fpr_target = 0.001  # 0.1%转换为小数
             valid_indices = np.where(fpr_roc <= fpr_target)[0]
 
@@ -126,13 +126,13 @@ def evaluate_mia(
             threshold_value = thresholds_roc[idx]
             actual_fpr = fpr_roc[idx]
 
-            metrics['TPR@FPR=0.1%'] = tpr_value
-            metrics['threshold_at_TPR@FPR=0.1%'] = threshold_value
-            metrics['actual_fpr_at_TPR@FPR=0.1%'] = actual_fpr
+            metrics['tpr_at_fpr'] = tpr_value
+            metrics['threshold'] = threshold_value
+            metrics['actual_fpr'] = actual_fpr
 
-            ResultSender.send_result("TPR@FPR=0.1%", tpr_value)
-            ResultSender.send_result("threshold_at_TPR@FPR=0.1%", threshold_value)
-            ResultSender.send_result("actual_fpr_at_TPR@FPR=0.1%", actual_fpr)
+            ResultSender.send_result("tpr_at_fpr", tpr_value)
+            ResultSender.send_result("threshold", threshold_value)
+            ResultSender.send_result("actual_fpr", actual_fpr)
 
         # 所有指标计算完成
         ResultSender.send_status("成功")
@@ -157,8 +157,8 @@ def print_metrics_summary(metrics: Dict[str, Any]):
         print(f"攻击平均精确率: {metrics['attack_average_precision']:.4f}")
 
     # 只打印TPR@FPR=0.1%的结果
-    if 'TPR@FPR=0.1%' in metrics:
+    if 'tpr_at_fpr' in metrics:
         print(
-            f"TPR@FPR=0.1%: 实际FPR={metrics['actual_fpr_at_TPR@FPR=0.1%']:.6f}, "
-            f"TPR={metrics['TPR@FPR=0.1%']:.4f}, 决策阈值={metrics['threshold_at_TPR@FPR=0.1%']:.4f}"
+            f"TPR@FPR=0.1%: 实际FPR={metrics['actual_fpr']:.4f}, "
+            f"TPR={metrics['tpr_at_fpr']:.4f}, 决策阈值={metrics['threshold']:.4f}"
         )
