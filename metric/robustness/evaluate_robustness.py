@@ -102,12 +102,12 @@ def evaluate_robustness_adv(test_loader, estimator, attack):
     return adverr, advacc, actc, acac
 
 
-def parse_attack_method(attack_str):
+def parse_attack_method(attack_str, eps):
     """将攻击方法字符串解析为包含方法和参数的字典"""
     return {
         "method": attack_str,
         "parameters": {
-            "eps": 0.4
+            "eps": eps
         }
     }
 
@@ -117,42 +117,50 @@ def evaluate_robustness_adv_all(test_loader, estimator, metrics):
     # attack_method = ["fgsm","pgd","cw0"]
     attack_method = ["fgsm"]
 
-    # 存储所有攻击方法的结果
-    all_results = {
-        'adverr': [],
-        'advacc': [],
-        'actc': [],
-        'acac': []
-    }
+    # eps参数列表，从0到1，步长0.1
+    eps_list = [round(eps, 1) for eps in np.arange(0.0, 1.1, 0.1)]
 
-    # 对每种攻击方法进行评估
+    # 存储所有eps的结果
+    eps_results = {}  # 键是eps，值是包含各指标的字典
+
+    # 对每种攻击方法和eps值进行评估
     for attack_name in attack_method:
-        attack_config = parse_attack_method(attack_name)
-        attack = AttackFactory.create(
-            estimator=estimator.get_core(),
-            config=attack_config
-        )
-        adverr, advacc, actc, acac = evaluate_robustness_adv(test_loader, estimator, attack)
+        for eps in eps_list:
+            print(f"\nEvaluating {attack_name} with eps={eps}")
+            attack_config = parse_attack_method(attack_name, eps)
+            attack = AttackFactory.create(
+                estimator=estimator.get_core(),
+                config=attack_config
+            )
+            adverr, advacc, actc, acac = evaluate_robustness_adv(test_loader, estimator, attack, eps)
 
-        # 收集每种攻击方法的结果
-        all_results['adverr'].append(adverr)
-        all_results['advacc'].append(advacc)
-        all_results['actc'].append(actc)
-        all_results['acac'].append(acac)
+            # 存储当前eps的结果
+            eps_results[eps] = {
+                'adverr': adverr,
+                'advacc': advacc,
+                'actc': actc,
+                'acac': acac
+            }
 
-    # 计算所有指标的平均值
-    if "adverr" in metrics:
-        print(f"adverr: {sum(all_results['adverr'])/len(all_results['adverr'])}")
-        ResultSender.send_result("adverr", f"{(sum(all_results['adverr'])/len(all_results['adverr'])):.4f}")
-    if "advacc" in metrics:
-        print(f"advacc: {sum(all_results['advacc']) / len(all_results['advacc'])}")
-        ResultSender.send_result("advacc", f"{(sum(all_results['advacc']) / len(all_results['advacc'])):.4f}")
-    if "actc" in metrics:
-        print(f"actc: {sum(all_results['actc']) / len(all_results['actc'])}")
-        ResultSender.send_result("actc", f"{(sum(all_results['actc']) / len(all_results['actc'])):.4f}")
-    if "acac" in metrics:
-        print(f"acac: {sum(all_results['acac']) / len(all_results['acac'])}")
-        ResultSender.send_result("acac", f"{(sum(all_results['acac']) / len(all_results['acac'])):.4f}")
+    # 发送每个eps的结果
+    for eps, results in eps_results.items():
+        result_dict = {metric: results[metric] for metric in metrics if metric in results}
+        ResultSender.send_result(f"eps_{eps}", result_dict)
+
+    # 计算所有eps的平均值
+    avg_results = {}
+    for metric in metrics:
+        valid_values = [results[metric] for eps, results in eps_results.items() if results[metric] is not None]
+        if valid_values:
+            avg = sum(valid_values) / len(valid_values)
+            avg_results[metric] = avg
+            print(f"Average {metric} across all eps: {avg:.4f}")
+            ResultSender.send_result(f"avg_{metric}", f"{avg:.4f}")
+        else:
+            print(f"No valid values for {metric} across all eps")
+            ResultSender.send_result(f"avg_{metric}", "None")
+
+    return eps_results, avg_results
 
 
 def evaluate_clean(test_loader, estimator):
