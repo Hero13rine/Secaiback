@@ -114,7 +114,6 @@ def parse_attack_method(attack_str, eps):
 
 def evaluate_robustness_adv_all(test_loader, estimator, metrics):
     ResultSender.send_log("进度", "对抗攻击评测开始")
-    # attack_method = ["fgsm","pgd","cw0"]
     attack_method = ["fgsm"]
 
     # eps参数列表，从0到1，步长0.1
@@ -132,7 +131,7 @@ def evaluate_robustness_adv_all(test_loader, estimator, metrics):
                 estimator=estimator.get_core(),
                 config=attack_config
             )
-            adverr, advacc, actc, acac = evaluate_robustness_adv(test_loader, estimator, attack, eps)
+            adverr, advacc, actc, acac = evaluate_robustness_adv(test_loader, estimator, attack)
 
             # 存储当前eps的结果
             eps_results[eps] = {
@@ -142,10 +141,15 @@ def evaluate_robustness_adv_all(test_loader, estimator, metrics):
                 'acac': acac
             }
 
-    # 发送每个eps的结果
-    for eps, results in eps_results.items():
-        result_dict = {metric: results[metric] for metric in metrics if metric in results}
-        ResultSender.send_result(f"eps_{eps}", result_dict)
+            # 发送当前eps的结果
+            result_args = []
+            for metric in metrics:
+                value = eps_results[eps][metric]
+                if value is not None:
+                    result_args.extend([f"{metric}_eps_{eps}", f"{value:.4f}"])
+                else:
+                    result_args.extend([f"{metric}_eps_{eps}", "None"])
+            ResultSender.send_result(*result_args)
 
     # 计算所有eps的平均值
     avg_results = {}
