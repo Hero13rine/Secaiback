@@ -141,17 +141,19 @@ def evaluate_robustness_adv_all(test_loader, estimator, metrics):
                 'acac': acac
             }
 
-            # 发送当前eps的结果
-            result_args = []
+            # 遍历每个指标，每次只发送一个键值对，键名格式为 metric_eps（如 acac_0_1）
             for metric in metrics:
                 value = eps_results[eps][metric]
+                # 将eps中的小数点替换为下划线（如0.1 → 0_1）
+                eps_str = str(eps).replace('.', '_')
+                key = f"{metric}_{eps_str}"
+                # 单个键值对传递：第一个参数是key，第二个是value
                 if value is not None:
-                    result_args.extend([f"{metric}_eps_{eps}", f"{value:.4f}"])
+                    ResultSender.send_result(key, f"{value:.4f}")
                 else:
-                    result_args.extend([f"{metric}_eps_{eps}", "None"])
-            ResultSender.send_result(*result_args)
+                    ResultSender.send_result(key, "None")
 
-    # 计算所有eps的平均值
+    # 计算所有eps的平均值，同样每次发送一个键值对
     avg_results = {}
     for metric in metrics:
         valid_values = [results[metric] for eps, results in eps_results.items() if results[metric] is not None]
@@ -159,10 +161,11 @@ def evaluate_robustness_adv_all(test_loader, estimator, metrics):
             avg = sum(valid_values) / len(valid_values)
             avg_results[metric] = avg
             print(f"Average {metric} across all eps: {avg:.4f}")
-            ResultSender.send_result(f"avg_{metric}", f"{avg:.4f}")
+            # 单个键值对传递平均值，键名格式为 metric_avg（如 acac_avg）
+            ResultSender.send_result(f"{metric}_avg", f"{avg:.4f}")
         else:
             print(f"No valid values for {metric} across all eps")
-            ResultSender.send_result(f"avg_{metric}", "None")
+            ResultSender.send_result(f"{metric}_avg", "None")
 
     return eps_results, avg_results
 
