@@ -35,3 +35,30 @@ def load_cifar(batch_size=64):
         transform=transform
     )
     return DataLoader(test_set, batch_size=batch_size, shuffle=False)
+
+def load_cifar_train_test(batch_size=64):
+    # CIFAR-10专用归一化参数
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465),
+                             (0.247, 0.243, 0.261))
+    ])
+
+    train_set = datasets.CIFAR10(
+        root="./data/cifar10",
+        train=True,  # 加载训练集
+        download=True,
+        transform=transform
+    )
+
+    test_set = datasets.CIFAR10(
+        root="./data/cifar10",
+        train=False,  # 加载测试集
+        download=True,
+        transform=transform
+    )
+
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
+
+    return train_loader, test_loader
