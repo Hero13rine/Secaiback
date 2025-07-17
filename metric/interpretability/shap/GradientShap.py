@@ -42,7 +42,7 @@ def GradientShap(model, test_loader):
         labels = [[f"Class: {label}" for label in sample] for sample in indexes.tolist()]
 
         # 5. 路径准备
-        evaluateMetric = os.getenv("evaluateMetric")
+        evaluateMetric = os.getenv("evaluateDimension")
         resultPath = os.getenv("resultPath") # 发往数据库的nfs路径
 
         result_list = []

@@ -1,5 +1,6 @@
 import numpy as np
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, \
+    confusion_matrix
 
 from utils.SecAISender import ResultSender
 
@@ -58,6 +59,10 @@ def cal_basic(estimator, test_loader, metrics):
                 if label.isdigit():
                     per_f1score[label] = metrics["f1-score"]
             ResultSender.send_result("per_f1score", per_f1score)
+
+        # 计算混淆矩阵
+        cm = confusion_matrix(all_labels, all_preds)
+        ResultSender.send_result("confusion_matrix", cm.tolist())
 
         ResultSender.send_status("成功")
         ResultSender.send_log("进度", "评测结果已写回数据库")

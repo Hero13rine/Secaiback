@@ -71,7 +71,7 @@ def main():
         cal_basic(estimator, test_loader, evaluation_config["basic"])
     elif evaluation_type == "robustness":
         evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
-    elif evaluation_type == "shap":
+    elif evaluation_type == "interpretability":
         GradientShap(model, test_loader)
     elif evaluation_type == "safety":
         train_loader, test_loader = load_cifar_train_test()
