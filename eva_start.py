@@ -7,6 +7,7 @@ from torch import optim
 
 from data.load_dataset import load_cifar_train_test
 from metric.basic.basic import cal_basic
+from metric.generalization.generalization import evaluate_generalization
 from metric.interpretability.shap.GradientShap import GradientShap
 from metric.safety.membershipinference.evaluate_mia import evaluate_mia
 from utils.SecAISender import ResultSender
@@ -76,6 +77,8 @@ def main():
     elif evaluation_type == "safety":
         train_loader, test_loader = load_cifar_train_test()
         evaluate_mia(train_loader, test_loader, estimator, evaluation_config["safety"]["membership_inference"])
+    elif evaluation_type == "generalization":
+        evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
 
     ResultSender.send_log("进度", "评测结束")
 
