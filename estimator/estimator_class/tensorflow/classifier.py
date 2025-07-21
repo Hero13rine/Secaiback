@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from art.estimators.classification import TensorFlowClassifier
+from art.estimators.classification import TensorFlowV2Classifier
 
 from ..base_estimator import BaseEstimator
 from estimator.estimator_factory import EstimatorFactory
@@ -22,7 +22,7 @@ class TensorFlowClassificationWrapper(BaseEstimator):
             return {"predictions": model(inputs)}
 
         # 初始化ART分类器
-        self.core = TensorFlowClassifier(
+        self.core = TensorFlowV2Classifier(
             model=serving_fn,
             clip_values=clip_values
         )

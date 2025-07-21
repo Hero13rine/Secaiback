@@ -1,6 +1,7 @@
 import os
 import sys
 
+import numpy as np
 import torch
 from art.utils import load_cifar10
 from torch import optim
@@ -12,6 +13,7 @@ from metric.interpretability.shap.GradientShap import GradientShap
 from metric.safety.membershipinference.evaluate_mia import evaluate_mia
 from utils.SecAISender import ResultSender
 from metric.robustness.evaluate_robustness import evaluation_robustness
+from metric.fairness.fairness_metrics import calculate_fairness_metrics
 
 # 将目标路径添加到系统路径
 sys.path.append('/app/userData/modelData/')
@@ -79,6 +81,12 @@ def main():
         evaluate_mia(train_loader, test_loader, estimator, evaluation_config["safety"]["membership_inference"])
     elif evaluation_type == "generalization":
         evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
+    
+    elif evaluation_type == "fairness":
+            def sensitive_attribute_fn(images):
+                # 示例：假设敏感属性是图像的奇偶索引
+                return np.array([i % 2 for i in range(len(images))])
+            calculate_fairness_metrics(estimator, test_loader, sensitive_attribute_fn, evaluation_config["fairness"])
 
     ResultSender.send_log("进度", "评测结束")
 
