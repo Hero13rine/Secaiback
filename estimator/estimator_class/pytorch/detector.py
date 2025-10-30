@@ -10,7 +10,7 @@ class PyTorchObjectDetectionWrapper:
     def __init__(
         self,
         model: torch.nn.Module,
-        loss: Any,                               # 仍接收 loss（项目内部可能会用到），但不下传
+        loss: Any,
         optimizer: Optional[torch.optim.Optimizer] = None,
         input_shape: Tuple[int, int, int] = (3, -1, -1),
         clip_values: Optional[Tuple[float, float]] = None,
@@ -25,12 +25,10 @@ class PyTorchObjectDetectionWrapper:
             "loss_objectness",
             "loss_rpn_box_reg",
         ),
-        **kwargs,  # 允许外部再塞其它参数，但不会盲目下传
+        **kwargs,
     ) -> None:
-        # 若你的工程对 loss 有严格校验，这里保留并通过（但仅存储，不传给 ART）
         self._loss = loss
 
-        # ⚠️ 关键：用“白名单参数”构造，绝不使用 **locals() / **kwargs 直接下传！
         art_ctor_kwargs: Dict[str, Any] = {
             "model": model,
             "input_shape": input_shape,
@@ -44,10 +42,9 @@ class PyTorchObjectDetectionWrapper:
             "device_type": device_type,
         }
 
-        # 初始化 ART 检测估计器（其签名不接受 loss）
+        # 初始化 ART 检测估计器
         self._detector = PyTorchObjectDetector(**art_ctor_kwargs)
 
-        # 你项目自用的其它配置（如分数阈值），可从 kwargs 中取
         self._score_threshold = kwargs.get("score_threshold", None)
 
     def get_core(self):
