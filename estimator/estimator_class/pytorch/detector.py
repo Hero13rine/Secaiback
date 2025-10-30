@@ -1,100 +1,93 @@
-"""PyTorch estimator wrapper for object detection models."""
+# estimator/estimator_class/pytorch/detector.py
+
 from __future__ import annotations
-
-from typing import Any, List
-
+from typing import Any, Iterable, Tuple, Optional, Dict
 import numpy as np
 import torch
+from art.estimators.object_detection import PyTorchObjectDetector
 
-from estimator.estimator_class.base_estimator import BaseEstimator
-from estimator.estimator_factory import EstimatorFactory
-
-
-@EstimatorFactory.register(framework="pytorch", task="object_detection")
-class PyTorchObjectDetectionWrapper(BaseEstimator):
-    """Wraps a PyTorch detection model to provide a unified predict interface."""
-
+class PyTorchObjectDetectionWrapper:
     def __init__(
         self,
         model: torch.nn.Module,
-        optimizer: torch.optim.Optimizer,
-        loss: Any,
-        device: str = "auto",
-        score_threshold: float = 0.0,
+        loss: Any,                               # 仍接收 loss（项目内部可能会用到），但不下传
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        input_shape: Tuple[int, int, int] = (3, -1, -1),
+        clip_values: Optional[Tuple[float, float]] = None,
+        preprocessing: Tuple[float, float] = (0.0, 1.0),
+        channels_first: bool = True,
+        device_type: str = "cpu",
+        preprocessing_defences: Optional[Iterable] = None,
+        postprocessing_defences: Optional[Iterable] = None,
+        attack_losses: Tuple[str, ...] = (
+            "loss_classifier",
+            "loss_box_reg",
+            "loss_objectness",
+            "loss_rpn_box_reg",
+        ),
+        **kwargs,  # 允许外部再塞其它参数，但不会盲目下传
+    ) -> None:
+        # 若你的工程对 loss 有严格校验，这里保留并通过（但仅存储，不传给 ART）
+        self._loss = loss
+
+        # ⚠️ 关键：用“白名单参数”构造，绝不使用 **locals() / **kwargs 直接下传！
+        art_ctor_kwargs: Dict[str, Any] = {
+            "model": model,
+            "input_shape": input_shape,
+            "optimizer": optimizer,
+            "clip_values": clip_values,
+            "channels_first": channels_first,
+            "preprocessing_defences": preprocessing_defences,
+            "postprocessing_defences": postprocessing_defences,
+            "preprocessing": preprocessing,
+            "attack_losses": attack_losses,
+            "device_type": device_type,
+        }
+
+        # 初始化 ART 检测估计器（其签名不接受 loss）
+        self._detector = PyTorchObjectDetector(**art_ctor_kwargs)
+
+        # 你项目自用的其它配置（如分数阈值），可从 kwargs 中取
+        self._score_threshold = kwargs.get("score_threshold", None)
+
+    def get_core(self):
+        return self._detector
+
+    @torch.no_grad()
+    def predict(
+        self,
+        batch: torch.Tensor,
+        score_threshold: Optional[float] = None,
     ):
-        if device == "auto":
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = device
-        self.model = model.to(self.device)
-        self.model.eval()
-        self.optimizer = optimizer
-        self.loss = loss
-        self.score_threshold = float(score_threshold)
-
-    def predict(self, batch) -> List[dict]:
-        self.model.eval()
-        images = self._prepare_inputs(batch)
-        with torch.no_grad():
-            outputs = self.model(images)
-
-        if isinstance(outputs, dict):
-            outputs = [outputs]
+        """
+        返回 List[Dict]: 每张图一个 dict，含 numpy 数组：
+          - 'boxes': (N, 4) float32 [x1,y1,x2,y2]
+          - 'scores': (N,)  float32
+          - 'labels': (N,)  int64
+        """
+        th = score_threshold if score_threshold is not None else self._score_threshold
         results = []
-        for output in outputs:
-            boxes = output.get("boxes")
-            scores = output.get("scores")
-            labels = output.get("labels")
+        # 逐张调用 ART 的 predict（其期望 batch 维度）
+        for i in range(batch.shape[0]):
+            preds_list = self._detector.predict(batch[i : i + 1])
+            # ART 返回的是一个 list（长度=批大小），这里取第 0 个
+            pred = preds_list[0]
+            boxes: np.ndarray = pred["boxes"]
+            scores: np.ndarray = pred["scores"]
+            labels: np.ndarray = pred["labels"]
 
-            boxes = self._tensor_to_numpy(boxes)
-            scores = self._tensor_to_numpy(scores)
-            labels = self._tensor_to_numpy(labels, dtype=np.int64)
+            if th is not None:
+                keep = scores >= th
+                boxes = boxes[keep]
+                scores = scores[keep]
+                labels = labels[keep]
 
-            if boxes.size == 0:
-                results.append({"boxes": boxes.reshape(-1, 4), "scores": scores.reshape(-1), "labels": labels.reshape(-1)})
-                continue
-
-            mask = np.ones_like(scores, dtype=bool)
-            if self.score_threshold > 0:
-                mask = scores >= self.score_threshold
-
-            filtered_boxes = boxes.reshape(-1, 4)[mask]
-            filtered_scores = scores.reshape(-1)[mask]
-            filtered_labels = labels.reshape(-1)[mask]
-
+            # 保证类型与测试断言一致
             results.append(
                 {
-                    "boxes": filtered_boxes,
-                    "scores": filtered_scores,
-                    "labels": filtered_labels,
+                    "boxes": boxes.astype(np.float32, copy=False),
+                    "scores": scores.astype(np.float32, copy=False),
+                    "labels": labels.astype(np.int64, copy=False),
                 }
             )
         return results
-
-    def get_core(self):
-        return self.model
-
-    def _prepare_inputs(self, batch) -> List[torch.Tensor]:
-        if isinstance(batch, torch.Tensor):
-            if batch.dim() == 3:
-                batch = batch.unsqueeze(0)
-            return [img.to(self.device) for img in batch]
-        if isinstance(batch, (list, tuple)):
-            return [self._ensure_tensor(img) for img in batch]
-        return [self._ensure_tensor(batch)]
-
-    def _ensure_tensor(self, image) -> torch.Tensor:
-        if isinstance(image, torch.Tensor):
-            return image.to(self.device)
-        return torch.as_tensor(image, device=self.device)
-
-    @staticmethod
-    def _tensor_to_numpy(tensor, dtype=None) -> np.ndarray:
-        if tensor is None:
-            return np.zeros((0,), dtype=dtype or np.float32)
-        if isinstance(tensor, np.ndarray):
-            array = tensor
-        else:
-            array = tensor.detach().cpu().numpy()
-        if dtype is not None:
-            array = array.astype(dtype, copy=False)
-        return array
