@@ -1,7 +1,7 @@
+import inspect
 import os
 
 import yaml
-import inspect
 
 
 class EstimatorFactory:

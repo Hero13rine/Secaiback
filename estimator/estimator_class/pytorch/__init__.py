@@ -1,1 +1,2 @@
 from .classifier import PyTorchClassificationWrapper
+from .detector import PyTorchObjectDetectionWrapper
