@@ -1,0 +1,20 @@
+model:
+  instantiation:
+    model_module: "model.net.dummy_detector"
+    model_class: "DummyObjectDetectionModel"
+    parameters:
+      num_classes: 3
+  estimator:
+    framework: "pytorch"
+    task: "object_detection"
+    parameters:
+      device: "cpu"
+      score_threshold: 0.5
+data:
+  batch_size: 2
+  parameters:
+    num_samples: 4
+    image_size: [3, 32, 32]
+    boxes_per_image: 1
+evaluation:
+  steps: 2
