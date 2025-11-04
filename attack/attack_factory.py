@@ -25,7 +25,7 @@ class AttackFactory:
     def create(cls, estimator, config: dict):
 
         # 调试
-        # print("Registered attacks:", AttackFactory._registry.keys())
+        print("Registered attacks:", AttackFactory._registry.keys())
 
         # 1. 防御性检查基础配置
         if not config["method"]:

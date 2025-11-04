@@ -4,9 +4,6 @@ from pathlib import Path
 
 import torch
 
-from model.net.cifar10 import Tudui
-
-
 def load_model(
         model_def_path: str,  # 模型定义文件路径（如 "model_definitions/tudui.py"）
         class_name: str,  # 模型类名（如 "Tudui"）
@@ -60,8 +57,18 @@ def load_model(
         ) from e
 
     # 4. 加载权重
+    # 4. 加载权重
     try:
-        state_dict = torch.load(weight_path)
+        # 加载整个 checkpoint（包含模型参数和可能的其他信息）
+        checkpoint = torch.load(weight_path)
+        
+        # 提取嵌套在 "net" 中的模型参数（针对 VGG19 权重文件的结构）
+        if "net" in checkpoint:
+            state_dict = checkpoint["net"]  # 模型参数在 checkpoint["net"] 中
+        else:
+            state_dict = checkpoint  # 兼容普通权重文件
+        
+        # 加载参数到模型
         model.load_state_dict(state_dict)
         model.eval()
     except Exception as e:

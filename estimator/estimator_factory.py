@@ -35,6 +35,7 @@ class EstimatorFactory:
         task = config["task"]
         if not framework or not task:
             raise ValueError("config必须包含framework和task字段")
+        print("防御性检查通过: framework =", framework, ", task =", task)
 
         # 2.动态加载参数模板
         schema_key = f"{framework}_{task}"
@@ -42,9 +43,12 @@ class EstimatorFactory:
             cls.load_schema(framework, task)
         schema = cls._param_schemas[schema_key]
 
+        print("参数模板加载完成:", schema_key)
+
         # 3. 参数校验
         required_params = schema['parameters']['required']
         optional_params = schema['parameters']['optional']
+        print("开始参数校验")
 
         # 4. 检查缺失的必要参数
         params_config = config["parameters"]
@@ -52,19 +56,19 @@ class EstimatorFactory:
             missing = [p for p in required_params if p not in params_config]
             if missing:
                 raise ValueError(f"Missing required parameters: {missing}")
-
+        print("参数校验通过")
         # 5. 合并可选参数默认值
         final_params = {**optional_params, ** params_config}
-
+        print("最终参数集:", final_params)
         # 6. 获取具体实现类
         impl_class = cls._registry.get(schema_key)
         if not impl_class:
             raise ValueError(f"No implementation for {schema_key}")
-
+        print("找到实现类:", impl_class)
         # 7. 过滤无效参数
         sig = inspect.signature(impl_class.__init__)
         valid_params = {k: v for k, v in final_params.items() if k in sig.parameters}
-
+        print("有效参数:", valid_params)
         # 8. 实例化并返回
         return impl_class(model, optimizer, loss, **valid_params)
 
