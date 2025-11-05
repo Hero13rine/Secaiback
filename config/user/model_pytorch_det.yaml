@@ -8,13 +8,10 @@ model:
     framework: "pytorch"
     task: "object_detection"
     parameters:
-      device: "cpu"
-      score_threshold: 0.5
-data:
-  batch_size: 2
-  parameters:
-    num_samples: 4
-    image_size: [3, 32, 32]
-    boxes_per_image: 1
+      device: "cuda"
+      input_shape: [3, 32, 32]
+      nb_classes: 10
+      clip_values: [ 0,1 ]
+      device_type: "gpu"
 evaluation:
-  steps: 2
+    basic: ["accuracy",'precision']
