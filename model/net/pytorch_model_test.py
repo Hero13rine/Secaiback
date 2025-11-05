@@ -1,5 +1,8 @@
-from torch import nn
-import torch
+import pytest
+
+_torch = pytest.importorskip("torch")
+from torch import nn  # type: ignore  # noqa: E402
+import torch  # type: ignore  # noqa: E402
 
 class small_basic_block(nn.Module):
     def __init__(self, ch_in, ch_out):

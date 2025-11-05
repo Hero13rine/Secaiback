@@ -16,7 +16,7 @@ class AttackFactory:
         project_root = os.path.dirname(os.path.dirname(current_script_path))
         """加载参数校验模板"""
         schema_path = project_root + f"/config/attack/{method}.yaml"
-        with open(schema_path) as f:
+        with open(schema_path, encoding='utf-8') as f:
             schema = yaml.safe_load(f)
             key = f"{method}"
             cls._param_schemas[key] = schema

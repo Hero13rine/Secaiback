@@ -3,33 +3,34 @@ import sys
 
 import numpy as np
 import torch
-from art.utils import load_cifar10
 from torch import optim
 
-from metric.basic.basic import cal_basic
-from metric.generalization.generalization import evaluate_generalization
-from metric.interpretability.shap.GradientShap import GradientShap
-from metric.safety.membershipinference.evaluate_mia import evaluate_mia
+from data.load_dataset import load_cifar_train_test
+from metric.classification.basic.basic import cal_basic
+from metric.classification.generalization.generalization import evaluate_generalization
+from metric.classification.interpretability.shap.GradientShap import GradientShap
+from metric.classification.safety.membershipinference.evaluate_mia import evaluate_mia
 from utils.SecAISender import ResultSender
-from metric.robustness.evaluate_robustness import evaluation_robustness
-from metric.fairness.fairness_metrics import calculate_fairness_metrics
+from metric.classification.robustness.evaluate_robustness import evaluation_robustness
+from metric.classification.fairness.fairness_metrics import calculate_fairness_metrics
 
 # 将目标路径添加到系统路径
 sys.path.append('/app/userData/modelData/')
 sys.path.append('/app/systemData/database_code/')
+from update_table import update
 
 from estimator import EstimatorFactory
-from method import evaluate, load_config
+from method import load_config
 from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
 from load_dataset import load_data
-from attack import AttackFactory
 
 
 def main():
 
     # 0.0获取当前 Pod 名称
     pod_name = os.getenv('HOSTNAME')  # 获取 Pod 名称（例如: 1242343443-1880539772613976065-basic）
+
     # 0.1从 Pod 名称中提取信息
     parts = pod_name.split('-')  # 根据 '-' 分割名称
     user_id = parts[0]  # 第一部分是用户ID
@@ -42,12 +43,12 @@ def main():
     model_instantiation_config = user_config["model"]["instantiation"]
     model_estimator_config = user_config["model"]["estimator"]
     evaluation_config = user_config["evaluation"]
-    print("进度: 配置文件已加载完毕")
+    ResultSender.send_log("进度", "配置文件已加载完毕")
 
     # 2.初始化模型
     model = load_model(model_instantiation_config["model_path"], model_instantiation_config["model_name"]
                        , model_instantiation_config["weight_path"], model_instantiation_config["parameters"])
-    print("进度: 模型初始化完成")
+    ResultSender.send_log("进度", "模型初始化完成")
 
     # 3.获取优化器和损失函数
     optimizer = optim.Adam(model.parameters(), lr=0.01)
@@ -60,11 +61,11 @@ def main():
         optimizer=optimizer,
         config=model_estimator_config
     )
-    print("进度: 估计器已生成")
+    ResultSender.send_log("进度", "估计器已生成")
 
     # 5.加载数据
-    train_loader, test_loader = load_data()
-    print("进度: 数据集已加载")
+    test_loader = load_data()
+    ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
     if evaluation_type == "basic":
@@ -74,20 +75,21 @@ def main():
     elif evaluation_type == "interpretability":
         GradientShap(model, test_loader)
     elif evaluation_type == "safety":
+        train_loader, test_loader = load_cifar_train_test()
         evaluate_mia(train_loader, test_loader, estimator, evaluation_config["safety"]["membership_inference"])
     elif evaluation_type == "generalization":
         evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
+    
     elif evaluation_type == "fairness":
-        def sensitive_attribute_fn(images):
-            # 示例：假设敏感属性是图像的奇偶索引
-            return np.array([i % 2 for i in range(len(images))])
+            def sensitive_attribute_fn(images):
+                # 示例：假设敏感属性是图像的奇偶索引
+                return np.array([i % 2 for i in range(len(images))])
+            calculate_fairness_metrics(estimator, test_loader, sensitive_attribute_fn, evaluation_config["fairness"])
 
-        calculate_fairness_metrics(estimator, test_loader, sensitive_attribute_fn, evaluation_config["fairness"])
-    print("进度: 评测结束")
-
+    ResultSender.send_log("进度", "评测结束")
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"错误: {str(e)}")
+        ResultSender.send_log("错误", str(e))

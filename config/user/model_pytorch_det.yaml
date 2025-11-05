@@ -1,0 +1,16 @@
+model:
+  instantiation:
+    model_module: "model.net.dummy_detector"
+    model_class: "DummyObjectDetectionModel"
+    parameters:
+      num_classes: 3
+  estimator:
+    framework: "pytorch"
+    task: "object_detection"
+    parameters:
+      input_shape: [3, 32, 32]
+      nb_classes: 10
+      clip_values: [ 0,1 ]
+      device_type: "gpu"
+evaluation:
+    basic: ["accuracy",'precision']
