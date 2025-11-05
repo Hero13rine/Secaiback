@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Sequence, Tuple, Union
-import os
+from typing import Any, Dict, Iterable, List, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -12,6 +11,60 @@ import numpy as np
 
 
 ArrayLike = Union[np.ndarray, Sequence[float]]
+
+_METRIC_ALIAS_MAP = {
+    "accuracy": "map_50",
+    "map50": "map_50",
+    "map@50": "map_50",
+}
+
+
+def _canonical_metric_name(name: Any) -> Any:
+    """Normalize a metric name so aliases share the same handling."""
+
+    if not isinstance(name, str):
+        return name
+    normalized = name.strip()
+    if not normalized:
+        return normalized
+    alias = _METRIC_ALIAS_MAP.get(normalized.lower())
+    return alias if alias is not None else normalized.lower()
+
+
+def _normalize_metrics_request(metrics) -> Tuple[List[str], Dict]:
+    """Extract metric names and auxiliary config from user configuration."""
+
+    if metrics is None:
+        return [], {}
+
+    config: Dict = {}
+    names: List[str] = []
+
+    if isinstance(metrics, dict):
+        # 优先处理与之前版本兼容的键
+        candidate_lists = [
+            metrics.get("performance_testing"),
+            metrics.get("basic"),
+            metrics.get("metrics"),
+        ]
+        for candidate in candidate_lists:
+            if candidate:
+                if isinstance(candidate, str):
+                    names = [candidate]
+                else:
+                    names = list(candidate)
+                break
+        config = (
+            metrics.get("performance_testing_config")
+            or metrics.get("config")
+            or {}
+        )
+    elif isinstance(metrics, (list, tuple, set)):
+        names = list(metrics)
+    else:
+        names = [metrics]
+
+    return names, dict(config) if isinstance(config, dict) else {}
 
 
 @dataclass
@@ -26,11 +79,10 @@ class DetectionSample:
     def from_prediction(cls, prediction: Dict[str, ArrayLike]) -> "DetectionSample":
         """
         从模型预测结果创建 DetectionSample 实例.
-        
-        Args:
-            prediction: 包含预测框、得分和标签的字典     pip install requests -i https://pypi.org/simple
 
-            
+        Args:
+            prediction: 包含预测框、得分和标签的字典
+
         Returns:
             DetectionSample 实例
         """
@@ -52,10 +104,10 @@ class DetectionSample:
     def from_ground_truth(cls, target: Dict[str, ArrayLike]) -> "DetectionSample":
         """
         从真实标签创建 DetectionSample 实例.
-        
+
         Args:
             target: 包含真实边界框和标签的字典
-            
+
         Returns:
             DetectionSample 实例
         """
@@ -77,7 +129,7 @@ class ObjectDetectionEvaluator:
     def __init__(self, iou_thresholds: Iterable[float]):
         """
         初始化评估器.
-        
+
         Args:
             iou_thresholds: 用于评估的 IoU 阈值列表
         """
@@ -88,14 +140,14 @@ class ObjectDetectionEvaluator:
     ) -> Dict[float, Dict[str, Union[float, Dict[str, float]]]]:
         """
         执行目标检测评估.
-        
+
         Args:
             predictions: 模型预测结果列表
             ground_truths: 真实标签列表
-            
+
         Returns:
             包含不同 IoU 阈值下评估结果的字典
-            
+
         Raises:
             ValueError: 当预测结果和真实标签数量不匹配时抛出
         """
@@ -151,7 +203,7 @@ class _ClassEvaluationStats:
 def cal_object_detection(estimator, test_loader, metrics: Dict[str, Union[List[str], Dict]]):
     """
     目标检测任务的评估入口点.
-    
+
     Args:
         estimator: 评估的模型估计器
         test_loader: 测试数据加载器
@@ -179,14 +231,14 @@ def cal_object_detection(estimator, test_loader, metrics: Dict[str, Union[List[s
             raise ValueError("测试集为空，无法进行评测")
 
         # 解析评估指标配置
-        metrics = metrics or {}
-        metric_names = metrics.get("performance_testing", []) if isinstance(metrics, dict) else metrics
-        if metric_names is None:
-            metric_names = []
-        config = metrics.get("performance_testing_config", {}) if isinstance(metrics, dict) else {}
+        metric_names, config = _normalize_metrics_request(metrics)
 
         # 确定需要评估的 IoU 阈值
-        requested_thresholds = set(float(th) for th in config.get("iou_thresholds", []))
+        requested_thresholds = set()
+        if isinstance(config, dict):
+            requested_thresholds.update(
+                float(th) for th in config.get("iou_thresholds", [])
+            )
         derived_thresholds = _derive_thresholds_from_metric_names(metric_names)
         requested_thresholds.update(derived_thresholds)
         if not requested_thresholds:
@@ -217,7 +269,7 @@ def cal_object_detection(estimator, test_loader, metrics: Dict[str, Union[List[s
 def _dispatch_results(metric_names: Iterable[str], config: Dict, evaluation_results: Dict[float, Dict[str, Union[float, Dict[str, float]]]]):
     """
     分发评估结果到结果发送器.
-    
+
     Args:
         metric_names: 需要发送的指标名称列表
         config: 评估配置
@@ -227,44 +279,55 @@ def _dispatch_results(metric_names: Iterable[str], config: Dict, evaluation_resu
         metric_names = ["map_50"]
 
     for name in metric_names:
-        if name in ("map", "map_50"):
+        canonical = _canonical_metric_name(name)
+        display_name = name if isinstance(name, str) else str(name)
+
+        if canonical in ("map", "map_50"):
             # 发送 IoU 阈值为 0.5 时的 mAP
-            _send_map_for_threshold(evaluation_results, 0.5, "map_50")
-        elif name.startswith("map_") and name not in ("map", "map_50", "map_5095"):
+            _send_map_for_threshold(
+                evaluation_results,
+                0.5,
+                display_name if display_name else canonical,
+            )
+        elif isinstance(canonical, str) and canonical.startswith("map_") and canonical not in ("map_50", "map_5095"):
             # 发送指定 IoU 阈值的 mAP
             try:
-                threshold = float(name.split("_")[1]) / 100.0
+                threshold = float(canonical.split("_")[1]) / 100.0
             except (IndexError, ValueError):
                 continue
-            _send_map_for_threshold(evaluation_results, threshold, f"map_{int(threshold * 100)}")
-        elif name == "map_5095":
+            key = display_name if display_name else f"map_{int(threshold * 100)}"
+            _send_map_for_threshold(evaluation_results, threshold, key)
+        elif canonical == "map_5095":
             # 计算 IoU 阈值从 0.5 到 0.95（步长 0.05）的平均 mAP
             values = [details["map"] for thr, details in evaluation_results.items() if 0.5 <= thr <= 0.95]
             values = [value for value in values if not np.isnan(value)]
             if values:
                 # 不进行ResultSender测试，只输出在控制台中
-                print(f"评测结果 - map_5095: {float(np.mean(values))}")
+                result_key = display_name if display_name else "map_5095"
+                print(f"评测结果 - {result_key}: {float(np.mean(values))}")
                 # ResultSender.send_result("map_5095", float(np.mean(values)))
-        elif name == "per_class_ap":
+        elif canonical == "per_class_ap":
             # 发送每个类别的 AP 值
             if 0.5 in evaluation_results:
-                # 不进行ResultSender测试，只输出在控制台中
-                print(f"评测结果 - per_class_ap_50: {evaluation_results[0.5]['per_class']}")
+                result_key = display_name if display_name else "per_class_ap_50"
+                print(f"评测结果 - {result_key}: {evaluation_results[0.5]['per_class']}")
                 # ResultSender.send_result("per_class_ap_50", evaluation_results[0.5]["per_class"])
-        elif name == "precision":
+        elif canonical == "precision":
             # 发送指定 IoU 阈值的精度
-            threshold = float(config.get("precision_iou_threshold", 0.5))
-            _send_scalar_metric(evaluation_results, threshold, "precision")
-        elif name == "recall":
+            threshold = float(config.get("precision_iou_threshold", 0.5)) if isinstance(config, dict) else 0.5
+            display_key = display_name or None
+            _send_scalar_metric(evaluation_results, threshold, "precision", display_key)
+        elif canonical == "recall":
             # 发送指定 IoU 阈值的召回率
-            threshold = float(config.get("recall_iou_threshold", 0.5))
-            _send_scalar_metric(evaluation_results, threshold, "recall")
+            threshold = float(config.get("recall_iou_threshold", 0.5)) if isinstance(config, dict) else 0.5
+            display_key = display_name or None
+            _send_scalar_metric(evaluation_results, threshold, "recall", display_key)
 
 
 def _send_map_for_threshold(evaluation_results: Dict[float, Dict[str, Union[float, Dict[str, float]]]], threshold: float, key: str):
     """
     发送指定阈值的 mAP 结果.
-    
+
     Args:
         evaluation_results: 评估结果
         threshold: IoU 阈值
@@ -278,10 +341,15 @@ def _send_map_for_threshold(evaluation_results: Dict[float, Dict[str, Union[floa
             # ResultSender.send_result(key, float(value))
 
 
-def _send_scalar_metric(evaluation_results: Dict[float, Dict[str, Union[float, Dict[str, float]]]], threshold: float, metric_key: str):
+def _send_scalar_metric(
+    evaluation_results: Dict[float, Dict[str, Union[float, Dict[str, float]]]],
+    threshold: float,
+    metric_key: str,
+    display_name: Union[str, None] = None,
+):
     """
     发送标量指标结果.
-    
+
     Args:
         evaluation_results: 评估结果
         threshold: IoU 阈值
@@ -291,31 +359,33 @@ def _send_scalar_metric(evaluation_results: Dict[float, Dict[str, Union[float, D
         value = evaluation_results[threshold].get(metric_key)
         if value is not None and not np.isnan(value):
             # 不进行ResultSender测试，只输出在控制台中
-            print(f"评测结果 - {metric_key}_{int(threshold * 100)}: {float(value)}")
+            label = display_name or f"{metric_key}_{int(threshold * 100)}"
+            print(f"评测结果 - {label}: {float(value)}")
             # ResultSender.send_result(f"{metric_key}_{int(threshold * 100)}", float(value))
 
 
 def _derive_thresholds_from_metric_names(metric_names: Iterable[str]) -> set:
     """
     从指标名称中推导出需要的 IoU 阈值.
-    
+
     Args:
         metric_names: 指标名称列表
-        
+
     Returns:
         需要的 IoU 阈值集合
     """
     thresholds = set()
     for name in metric_names or []:
-        if name in ("map", "map_50", "precision", "recall", "per_class_ap"):
+        canonical = _canonical_metric_name(name)
+        if canonical in ("map", "map_50", "precision", "recall", "per_class_ap"):
             thresholds.add(0.5)
-        elif name.startswith("map_") and name != "map_5095":
+        elif isinstance(canonical, str) and canonical.startswith("map_") and canonical != "map_5095":
             try:
-                threshold = float(name.split("_")[1]) / 100.0
+                threshold = float(canonical.split("_")[1]) / 100.0
                 thresholds.add(threshold)
             except (IndexError, ValueError):
                 continue
-        elif name == "map_5095":
+        elif canonical == "map_5095":
             # 添加从 0.5 到 0.95，步长为 0.05 的阈值
             thresholds.update(np.round(np.arange(0.5, 1.0, 0.05), 2))
     return thresholds

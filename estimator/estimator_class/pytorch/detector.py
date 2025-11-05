@@ -5,7 +5,10 @@ from typing import Any, Iterable, Tuple, Optional, Dict
 import numpy as np
 import torch
 from art.estimators.object_detection import PyTorchObjectDetector
+from estimator.estimator_factory import EstimatorFactory
 
+
+@EstimatorFactory.register(framework="pytorch", task="object_detection")
 class PyTorchObjectDetectionWrapper:
     def __init__(
         self,
@@ -14,9 +17,9 @@ class PyTorchObjectDetectionWrapper:
         optimizer: Optional[torch.optim.Optimizer] = None,
         input_shape: Tuple[int, int, int] = (3, -1, -1),
         clip_values: Optional[Tuple[float, float]] = None,
-        preprocessing: Tuple[float, float] = (0.0, 1.0),
+        # preprocessing: Tuple[float, float] = (0.0, 1.0),
         channels_first: bool = True,
-        device_type: str = "cpu",
+        device_type: str = "gpu",
         preprocessing_defences: Optional[Iterable] = None,
         postprocessing_defences: Optional[Iterable] = None,
         attack_losses: Tuple[str, ...] = (
@@ -37,7 +40,7 @@ class PyTorchObjectDetectionWrapper:
             "channels_first": channels_first,
             "preprocessing_defences": preprocessing_defences,
             "postprocessing_defences": postprocessing_defences,
-            "preprocessing": preprocessing,
+            # "preprocessing": preprocessing,
             "attack_losses": attack_losses,
             "device_type": device_type,
         }
@@ -62,6 +65,10 @@ class PyTorchObjectDetectionWrapper:
           - 'scores': (N,)  float32
           - 'labels': (N,)  int64
         """
+        # 确保 batch 是张量
+        if isinstance(batch, list):
+            batch = torch.stack(batch)
+        
         th = score_threshold if score_threshold is not None else self._score_threshold
         results = []
         # 逐张调用 ART 的 predict（其期望 batch 维度）

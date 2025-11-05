@@ -8,7 +8,6 @@ model:
     framework: "pytorch"
     task: "object_detection"
     parameters:
-      device: "cuda"
       input_shape: [3, 32, 32]
       nb_classes: 10
       clip_values: [ 0,1 ]
