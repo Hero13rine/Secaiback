@@ -3,17 +3,16 @@ import sys
 
 import numpy as np
 import torch
-from art.utils import load_cifar10
 from torch import optim
 
 from data.load_dataset import load_cifar_train_test
-from metric.basic.basic import cal_basic
-from metric.generalization.generalization import evaluate_generalization
-from metric.interpretability.shap.GradientShap import GradientShap
-from metric.safety.membershipinference.evaluate_mia import evaluate_mia
+from metric.classification.basic.basic import cal_basic
+from metric.classification.generalization.generalization import evaluate_generalization
+from metric.classification.interpretability.shap.GradientShap import GradientShap
+from metric.classification.safety.membershipinference.evaluate_mia import evaluate_mia
 from utils.SecAISender import ResultSender
-from metric.robustness.evaluate_robustness import evaluation_robustness
-from metric.fairness.fairness_metrics import calculate_fairness_metrics
+from metric.classification.robustness.evaluate_robustness import evaluation_robustness
+from metric.classification.fairness.fairness_metrics import calculate_fairness_metrics
 
 # 将目标路径添加到系统路径
 sys.path.append('/app/userData/modelData/')
@@ -21,11 +20,10 @@ sys.path.append('/app/systemData/database_code/')
 from update_table import update
 
 from estimator import EstimatorFactory
-from method import evaluate, load_config
+from method import load_config
 from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
 from load_dataset import load_data
-from attack import AttackFactory
 
 
 def main():

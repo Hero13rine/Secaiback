@@ -4,7 +4,7 @@ import torch
 import matplotlib
 
 from utils.SecAISender import ResultSender
-from metric.interpretability.shap.imagePlot import image_plot_no_orig_nobar
+from metric.classification.interpretability.shap.imagePlot import image_plot_no_orig_nobar
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
