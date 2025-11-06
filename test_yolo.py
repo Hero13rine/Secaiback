@@ -18,7 +18,7 @@ from typing import List, Dict, Any, Optional
 from estimator import EstimatorFactory
 from method.load_config import load_config
 from metric.object_detection.basic.detection import cal_object_detection
-from model import load_yolo_model
+from model.load_yolo_model import load_yolo_model
 from data.load_yolo_dataset import load_dior # 您的 DIOR 数据加载器
 
 # 尝试导入 YOLOv7 的工具函数 (可选，用于高级调试)
