@@ -17,7 +17,7 @@ from metric.classification.fairness.fairness_metrics import calculate_fairness_m
 # 将目标路径添加到系统路径
 sys.path.append('/app/userData/modelData/')
 sys.path.append('/app/systemData/database_code/')
-from update_table import update
+# from update_table import update
 
 from estimator import EstimatorFactory
 from method import load_config
