@@ -6,6 +6,7 @@ metadata:
 parameters:
   required:
     - input_shape  # 例如 [3, 640, 640]
+    # - nb_classes
     - clip_values
   optional:
     preprocessing: [0.0, 1.0]

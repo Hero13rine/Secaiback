@@ -1,0 +1,20 @@
+# YOLOv7 目标检测配置
+# 用于评测 YOLOv7 模型在 DIOR 数据集上的性能
+
+model:
+  instantiation:
+    model_path: "/wkm/secai-common/yolo/yolov7"  # YOLOv7 仓库路径（绝对路径）
+    weight_path: "/wkm/secai-common/yolo/yolov7/runs/train/exp12/weights/best.pt"  # 模型权重路径
+    model_name: "YOLOv7"  # 模型名称标识
+    parameters:
+      
+  estimator:
+    framework: "pytorch"
+    task: "object_detection"
+    parameters:
+      input_shape: [3, 640, 640]
+      clip_values: [0, 1]
+      device_type: "auto"
+
+evaluation:
+  basic: ["map50", "map50_95"]  # mAP@0.5, mAP@0.5:0.95
