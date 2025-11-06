@@ -1,0 +1,11 @@
+/fasterrcnn_test/
+/__pycache__/
+secai-common/metric/__pycache__
+secai-common/metric/object_detection/__pycache__
+secai-common/metric/object_detection/basic/__pycache__
+secai-common/metric/object_detection/basic/detection/__pycache__
+secai-common/metric/object_detection/basic/detection/detection/__pycache__
+secai-common/metric/object_detection/basic/detection/detection/detection/__pycache__
+secai-common/metric/object_detection/basic/detection/detection/detection/detection/__pycache__
+secai-common/metric/object_detection/basic/detection/detection/detection/detection/detection/__pycache__
+secai-common/metric/object_detection/basic/detection/detection/detection/detection/detection/__pycache__
