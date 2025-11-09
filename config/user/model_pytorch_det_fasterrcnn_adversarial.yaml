@@ -9,6 +9,7 @@ model:
       "network": "fasterrcnn"
       "pretrained": True
       "trainable_backbone_layers": 3
+      "use_rotated_iou": false
   estimator:
     framework: "pytorch"
     task: "object_detection"
@@ -27,8 +28,6 @@ evaluation:
       attacks:
         fgsm:
           metrics: ["map_drop_rate", "miss_rate", "false_detection_rate"]
-        pgd:
-          metrics: ["map_drop_rate", "miss_rate"]
   interpretability: []
   safety: []
   generalization: []

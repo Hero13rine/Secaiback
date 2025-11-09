@@ -13,3 +13,4 @@ parameters:
     channels_first: true
     device_type: auto  # auto/gpu/cpu
     score_threshold: 0.0
+

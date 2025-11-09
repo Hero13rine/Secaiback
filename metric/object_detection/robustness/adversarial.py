@@ -48,14 +48,18 @@ class AttackEvaluationResult:
 class AdversarialRobustnessEvaluator:
     """计算对抗攻击检测器的鲁棒性指标."""
 
-    def __init__(self, iou_threshold: float = 0.5) -> None:
+    def __init__(
+            self, iou_threshold: float = 0.5, use_rotated_iou: bool = False
+    ) -> None:
         """初始化对抗鲁棒性评估器.
 
         Args:
             iou_threshold (float): IoU阈值，用于匹配预测框和真实框，默认为0.5
+            use_rotated_iou (bool): 是否使用旋转框的IoU计算，默认为False
         """
         self.iou_threshold = float(iou_threshold)
         # 初始化目标检测评估器，用于计算mAP等指标
+        self.use_rotated_iou = bool(use_rotated_iou)
         self._detector = ObjectDetectionEvaluator([self.iou_threshold])
 
     def evaluate_attack(
@@ -102,7 +106,12 @@ class AdversarialRobustnessEvaluator:
         total_predictions = 0
 
         # 遍历每个旋转角度进行评估
-        for rotation in rotation_union:
+        total_rotations = len(rotation_union)
+        print(f"  进度: 开始评估攻击 '{attack_name}'，共 {total_rotations} 个旋转角度...")
+        
+        for idx, rotation in enumerate(rotation_union, 1):
+            print(f"    进度: 处理旋转角度 {rotation} ({idx}/{total_rotations})...")
+            
             # 获取基线预测样本
             base_samples = self._to_samples(
                 baseline_predictions.get(rotation, []),
@@ -136,12 +145,15 @@ class AdversarialRobustnessEvaluator:
                 )
 
             # 计算基线和对抗攻击后的mAP
+            print(f"      进度: 计算基线mAP...")
             base_map = self._compute_map(base_samples, gt_samples)
+            print(f"      进度: 计算对抗攻击后mAP...")
             adv_map = self._compute_map(adv_samples, gt_samples)
             baseline_maps.append(base_map)
             adversarial_maps.append(adv_map)
 
             # 计算检测错误（漏检和误检）
+            print(f"      进度: 计算检测错误...")
             misses, false_positives, gt_count, pred_count = self._compute_detection_errors(
                 adv_samples, gt_samples
             )
@@ -162,6 +174,7 @@ class AdversarialRobustnessEvaluator:
             )
 
         # 计算整体指标（所有旋转角度的平均值）
+        print(f"  进度: 计算整体指标...")
         overall = self._compose_metrics(
             float(np.mean(baseline_maps)) if baseline_maps else 0.0,
             float(np.mean(adversarial_maps)) if adversarial_maps else 0.0,
@@ -172,6 +185,7 @@ class AdversarialRobustnessEvaluator:
             normalized_metrics,
         )
 
+        print(f"  进度: 攻击 '{attack_name}' 评估完成")
         return AttackEvaluationResult(
             attack_name=attack_name,
             overall=overall,
@@ -281,6 +295,9 @@ class AdversarialRobustnessEvaluator:
             total_predictions += pred_boxes.shape[0]
             # 使用贪婪IoU匹配算法匹配预测框和真实框
             matches = _greedy_iou_match(pred_boxes, gt_boxes, self.iou_threshold)
+            matches = _select_greedy_matcher(self.use_rotated_iou)(
+                pred_boxes, gt_boxes, self.iou_threshold
+            )
             # 计算漏检数（真实框数 - 匹配数）
             misses += gt_boxes.shape[0] - len(matches)
             # 计算误检数（预测框数 - 匹配数）
@@ -388,102 +405,112 @@ class AdversarialRobustnessEvaluator:
         return float(max(0.0, drop))
 
 
-def _greedy_iou_match(
+def _select_greedy_matcher(use_rotated_iou: bool) -> Callable[[np.ndarray, np.ndarray, float], List[Tuple[int, int]]]:
+    """Pick the matching strategy based on rotation IoU requirements."""
+
+    return _greedy_iou_match_rotated if use_rotated_iou else _greedy_iou_match_axis_aligned
+
+
+def _greedy_iou_match_axis_aligned(
     pred_boxes: np.ndarray, gt_boxes: np.ndarray, threshold: float
 ) -> List[Tuple[int, int]]:
-    """在预测框和真实框之间执行贪婪IoU匹配.
+    """Greedy IoU matching for axis-aligned boxes with vectorised IoU."""
 
-    Args:
-        pred_boxes: 预测框数组，形状为(N, 4)
-        gt_boxes: 真实框数组，形状为(M, 4)
-        threshold: IoU阈值
+    return _greedy_iou_match_generic(
+        pred_boxes, gt_boxes, threshold, _pairwise_iou_axis_aligned
+    )
 
-    Returns:
-        List[Tuple[int, int]]: 匹配的索引对列表，每个元组为(预测框索引, 真实框索引)
+
+def _greedy_iou_match_rotated(
+    pred_boxes: np.ndarray, gt_boxes: np.ndarray, threshold: float
+) -> List[Tuple[int, int]]:
+    """Greedy matching fallback for rotated boxes.
+
+    Currently defaults to axis-aligned IoU unless an external rotated IoU
+    implementation is registered via :func:`set_rotated_iou_fn`.
     """
 
-    # 处理空数组情况
+    return _greedy_iou_match_generic(
+        pred_boxes, gt_boxes, threshold, _get_rotated_iou_fn()
+    )
+
+
+def _greedy_iou_match_generic(
+    pred_boxes: np.ndarray,
+    gt_boxes: np.ndarray,
+    threshold: float,
+    pairwise_iou_fn: Callable[[np.ndarray, np.ndarray], np.ndarray],
+) -> List[Tuple[int, int]]:
     if pred_boxes.size == 0 or gt_boxes.size == 0:
         return []
 
-    # 计算所有预测框和真实框之间的IoU矩阵
-    iou_matrix = _pairwise_iou(pred_boxes, gt_boxes)
-    matches: List[Tuple[int, int]] = []
-    used_gt: set[int] = set()
-    used_pred: set[int] = set()
+    iou_matrix = pairwise_iou_fn(pred_boxes, gt_boxes)
+    if iou_matrix.size == 0:
+        return []
 
-    # 贪婪匹配过程
+    matches: List[Tuple[int, int]] = []
+
     while True:
-        # 找到所有未使用的预测框和真实框之间的IoU
-        remaining = [
-            (i, j, iou_matrix[i, j])
-            for i in range(iou_matrix.shape[0])
-            for j in range(iou_matrix.shape[1])
-            if i not in used_pred and j not in used_gt
-        ]
-        if not remaining:
+        flat_index = int(np.argmax(iou_matrix))
+        best_iou = float(iou_matrix.flat[flat_index])
+        if not np.isfinite(best_iou) or best_iou < threshold or best_iou <= 0.0:
             break
-        # 选择IoU最大的一对
-        best = max(remaining, key=lambda item: item[2])
-        i, j, iou = best
-        # 如果IoU低于阈值，则停止匹配
-        if iou < threshold:
-            break
-        # 记录匹配结果
-        matches.append((i, j))
-        used_pred.add(i)
-        used_gt.add(j)
+        pred_idx, gt_idx = divmod(flat_index, iou_matrix.shape[1])
+        matches.append((pred_idx, gt_idx))
+        iou_matrix[pred_idx, :] = -1.0
+        iou_matrix[:, gt_idx] = -1.0
 
     return matches
 
 
-def _pairwise_iou(pred_boxes: np.ndarray, gt_boxes: np.ndarray) -> np.ndarray:
-    """计算两组框之间的成对IoU.
+def _pairwise_iou_axis_aligned(pred_boxes: np.ndarray, gt_boxes: np.ndarray) -> np.ndarray:
+    """Vectorised pairwise IoU for axis-aligned bounding boxes."""
 
-    Args:
-        pred_boxes: 预测框数组，形状为(N, 4)
-        gt_boxes: 真实框数组，形状为(M, 4)
-
-    Returns:
-        np.ndarray: IoU矩阵，形状为(N, M)
-    """
-
-    # 处理空数组情况
     if pred_boxes.size == 0 or gt_boxes.size == 0:
         return np.zeros((pred_boxes.shape[0], gt_boxes.shape[0]), dtype=np.float32)
 
-    # 数据类型转换
-    pred = pred_boxes.astype(np.float32)
-    gt = gt_boxes.astype(np.float32)
+    pred = np.asarray(pred_boxes, dtype=np.float32).reshape(-1, 4)
+    gt = np.asarray(gt_boxes, dtype=np.float32).reshape(-1, 4)
 
-    # 重塑为(N, 4)和(M, 4)形状
-    pred = pred.reshape(-1, 4)
-    gt = gt.reshape(-1, 4)
+    pred_exp = pred[:, None, :]
+    gt_exp = gt[None, :, :]
 
-    # 初始化IoU矩阵
-    iou = np.zeros((pred.shape[0], gt.shape[0]), dtype=np.float32)
-    
-    # 计算每对框之间的IoU
-    for i, p in enumerate(pred):
-        px1, py1, px2, py2 = p
-        # 计算预测框面积
-        p_area = max(px2 - px1, 0) * max(py2 - py1, 0)
-        for j, g in enumerate(gt):
-            gx1, gy1, gx2, gy2 = g
-            # 计算真实框面积
-            g_area = max(gx2 - gx1, 0) * max(gy2 - gy1, 0)
-            # 计算交集区域坐标
-            ix1 = max(px1, gx1)
-            iy1 = max(py1, gy1)
-            ix2 = min(px2, gx2)
-            iy2 = min(py2, gy2)
-            # 计算交集区域宽高
-            inter_w = max(ix2 - ix1, 0)
-            inter_h = max(iy2 - iy1, 0)
-            # 计算交集面积
-            intersection = inter_w * inter_h
-            # 计算并集面积
-            union = p_area + g_area - intersection
-            # 计算IoU
-            iou[i, j] = intersection / union if union > 0 else 0.0
-    return iou
+    ix1 = np.maximum(pred_exp[..., 0], gt_exp[..., 0])
+    iy1 = np.maximum(pred_exp[..., 1], gt_exp[..., 1])
+    ix2 = np.minimum(pred_exp[..., 2], gt_exp[..., 2])
+    iy2 = np.minimum(pred_exp[..., 3], gt_exp[..., 3])
+
+    inter_w = np.maximum(ix2 - ix1, 0.0)
+    inter_h = np.maximum(iy2 - iy1, 0.0)
+    intersection = inter_w * inter_h
+
+    pred_area = np.maximum(pred_exp[..., 2] - pred_exp[..., 0], 0.0) * np.maximum(
+        pred_exp[..., 3] - pred_exp[..., 1], 0.0
+    )
+    gt_area = np.maximum(gt_exp[..., 2] - gt_exp[..., 0], 0.0) * np.maximum(
+        gt_exp[..., 3] - gt_exp[..., 1], 0.0
+    )
+    union = pred_area + gt_area - intersection
+    union = np.maximum(union, np.finfo(np.float32).eps)
+
+    return (intersection / union).astype(np.float32)
+
+
+_ROTATED_IOU_FN: Optional[
+    Callable[[np.ndarray, np.ndarray], np.ndarray]
+] = None
+
+
+def set_rotated_iou_fn(
+    iou_fn: Optional[Callable[[np.ndarray, np.ndarray], np.ndarray]]
+) -> None:
+    """Register a custom pairwise IoU implementation for rotated boxes."""
+
+    global _ROTATED_IOU_FN
+    _ROTATED_IOU_FN = iou_fn
+
+
+def _get_rotated_iou_fn() -> Callable[[np.ndarray, np.ndarray], np.ndarray]:
+    if _ROTATED_IOU_FN is not None:
+        return _ROTATED_IOU_FN
+    return _pairwise_iou_axis_aligned

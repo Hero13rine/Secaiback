@@ -57,6 +57,7 @@ def evaluate_adversarial_robustness(
     test_data: Union[Iterable, Mapping[Any, Iterable]],
     config: Optional[Mapping[str, Any]] = None,
     config_path: Optional[Union[str, Path]] = None,
+    use_rotated_iou: Optional[bool] = None,
     iou_threshold: float = 0.5,
     batch_size: int = 1,
 ) -> Dict[str, AttackEvaluationResult]:
@@ -70,6 +71,7 @@ def evaluate_adversarial_robustness(
                    图像应该是与 ``estimator`` 的 ``predict`` 方法兼容的张量。
         config: 允许选择攻击、旋转和指标的解析后配置字典。
         config_path: 包含配置的YAML文件的可选路径。
+        use_rotated_iou: 是否使用旋转IoU计算，如果为None则从配置中提取
         iou_threshold: 指标计算的IoU阈值。
         batch_size: 调用估计器进行预测时一起处理的样本数量。
 
@@ -81,38 +83,57 @@ def evaluate_adversarial_robustness(
     if config_path:
         config = load_robustness_config(config_path)
     config = config or {}
+    if use_rotated_iou is None:
+        use_rotated_iou = _extract_use_rotated_iou(config)
+    if use_rotated_iou is None:
+        raise ValueError("use_rotated_iou 参数是必需的，但在配置中未找到")
 
+    print(f"进度: 开始处理数据集...")
     # 标准化测试数据格式
     data_by_rotation = _normalize_test_data(test_data)
     # 收集数据集
     dataset = _collect_dataset(data_by_rotation)
     if not dataset:
         raise ValueError("测试数据必须至少提供一个样本")
-
+    print("进度", "数据集已加载")
+    
     # 存储每个旋转角度的真实标签和基线预测结果
     ground_truths_by_rotation: Dict[float, List[PredictionLike]] = {}
     baseline_predictions: Dict[float, List[PredictionLike]] = {}
 
     # 对每个旋转角度的数据进行处理
-    for rotation, (images, targets) in dataset.items():
+    total_rotations = len(dataset)
+    for idx, (rotation, (images, targets)) in enumerate(dataset.items(), 1):
+        print(f"进度: 处理旋转角度 {rotation} ({idx}/{total_rotations})...")
         # 标准化真实标签
         ground_truths_by_rotation[rotation] = [_normalize_target(target) for target in targets]
         # 运行基线预测
         baseline_predictions[rotation] = _run_predictions(estimator, images, batch_size=batch_size)
 
     # 解析攻击配置
+    print("进度: 解析攻击配置...")
     attack_configs = _parse_attack_configs(config)
     if not attack_configs:
         return {}
 
     # 创建对抗鲁棒性评估器实例
-    evaluator = AdversarialRobustnessEvaluator(iou_threshold=iou_threshold)
+    evaluator = AdversarialRobustnessEvaluator(
+        iou_threshold=iou_threshold,
+        use_rotated_iou=use_rotated_iou,
+    )
     results: Dict[str, AttackEvaluationResult] = {}
 
     # 对每种攻击进行评估
+    total_attacks = len([attack for attack in attack_configs if attack.enabled])
+    print(f"进度: 开始执行攻击流程测试，共 {total_attacks} 种攻击...")
+    
+    processed_attacks = 0
     for attack in attack_configs:
         if not attack.enabled:
             continue
+        
+        processed_attacks += 1
+        print(f"进度: 处理攻击 '{attack.name}' ({processed_attacks}/{total_attacks})...")
         
         # 实例化攻击对象
         attack_instance = _instantiate_attack(estimator, attack.factory_config)
@@ -120,9 +141,13 @@ def evaluate_adversarial_robustness(
 
         # 获取要使用的旋转角度
         rotations_to_use = attack.rotations or tuple(dataset.keys())
-        for rotation in rotations_to_use:
+        total_rotations_for_attack = len(rotations_to_use)
+        
+        for rot_idx, rotation in enumerate(rotations_to_use, 1):
             if rotation not in dataset:
                 raise KeyError(f"提供的数据中不包含旋转角度 {rotation}")
+            
+            print(f"  进度: 生成对抗样本 (旋转角度 {rotation}, {rot_idx}/{total_rotations_for_attack})...")
             
             # 获取原始图像
             images, _ = dataset[rotation]
@@ -141,6 +166,7 @@ def evaluate_adversarial_robustness(
         selected_attack = _filter_rotations(attack_predictions, attack.rotations)
 
         # 评估攻击效果
+        print(f"  进度: 评估攻击效果...")
         result = evaluator.evaluate_attack(
             attack.name,
             selected_baseline,
@@ -149,7 +175,9 @@ def evaluate_adversarial_robustness(
             attack.metrics,
         )
         results[attack.name] = result
+        print(f"进度: 攻击 '{attack.name}' 处理完成")
 
+    print("进度: 所有攻击处理完成")
     return results
 
 
@@ -249,6 +277,42 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
         raise ValueError("不支持的攻击配置格式")
 
     return [attack for attack in parsed if attack.enabled]
+
+
+def _extract_use_rotated_iou(config: Optional[Mapping[str, Any]]) -> bool:
+    """Read the rotated IoU requirement from the model section."""
+
+    if not isinstance(config, Mapping):
+        return False
+
+    model_section = config.get("model")
+    if not isinstance(model_section, Mapping):
+        return False
+
+    direct_flag = model_section.get("use_rotated_iou")
+    if isinstance(direct_flag, bool):
+        return direct_flag
+
+    instantiation = model_section.get("instantiation")
+    if isinstance(instantiation, Mapping):
+        instantiation_flag = instantiation.get("use_rotated_iou")
+        if isinstance(instantiation_flag, bool):
+            return instantiation_flag
+
+        instantiation_params = instantiation.get("parameters")
+        if isinstance(instantiation_params, Mapping):
+            param_flag = instantiation_params.get("use_rotated_iou")
+            if isinstance(param_flag, bool):
+                return param_flag
+
+    for key in ("base", "basic", "base_parameters", "parameters"):
+        nested = model_section.get(key)
+        if isinstance(nested, Mapping) and "use_rotated_iou" in nested:
+            flag = nested.get("use_rotated_iou")
+            if isinstance(flag, bool):
+                return flag
+
+    return False
 
 
 def _build_attack_config(
@@ -567,20 +631,19 @@ def _generate_adversarial_image(attack, image: torch.Tensor) -> torch.Tensor:
     
     # 将图像转换为NumPy数组
     np_input = _to_numpy_image(image)
+    np_input = np_input.astype(np.float32, copy=False)
     # 生成对抗样本批次
-    adv_batch = attack.generate(np_input[None, ...])
-    # 提取第一张对抗图像
-    adv_np = adv_batch[0] if isinstance(adv_batch, np.ndarray) else np.array(adv_batch)[0]
-    # 转换回PyTorch张量
+    adv_batch = attack.generate(np_input[None, ...].astype(np.float32, copy=False))
+    if isinstance(adv_batch, np.ndarray):
+        adv_np = adv_batch.astype(np.float32, copy=False)[0]
+    else:
+        adv_np = np.array(adv_batch, dtype=np.float32)[0]
     adv_tensor = torch.from_numpy(adv_np)
-    
     # 保持与原始图像相同的设备和数据类型
     if isinstance(image, torch.Tensor):
         adv_tensor = adv_tensor.to(image.device)
         adv_tensor = adv_tensor.type(image.dtype)
-    
     return adv_tensor
-
 
 def _stack_batch(batch: Sequence[torch.Tensor]) -> torch.Tensor:
     """堆叠批次图像
@@ -670,7 +733,21 @@ def _clone_image(image: Any) -> torch.Tensor:
     
     # 处理PyTorch张量
     if isinstance(image, torch.Tensor):
-        return image.detach().clone()
+        cloned_image = image.detach().clone()
+        # 如果图像尺寸较大，则调整图像大小以减少内存使用
+        if cloned_image.numel() > 1000000:  # 如果元素数量超过100万
+            # 检查是否为3通道图像 (C, H, W)
+            if cloned_image.dim() == 3 and cloned_image.shape[0] == 3:
+                # 缩放图像到较小尺寸以减少内存使用
+                from torchvision import transforms
+                resize_transform = transforms.Resize((416, 416))  # 缩小到416x416
+                cloned_image = resize_transform(cloned_image)
+            elif cloned_image.dim() == 3 and cloned_image.shape[0] == 1:
+                # 灰度图像
+                from torchvision import transforms
+                resize_transform = transforms.Resize((416, 416))
+                cloned_image = resize_transform(cloned_image)
+        return cloned_image
     
     # 处理其他类型，转换为NumPy数组再转为张量
     array = np.array(image)
