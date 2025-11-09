@@ -1,0 +1,120 @@
+"""Entry script showcasing adversarial robustness evaluation for detection models."""
+from __future__ import annotations
+
+import importlib
+from typing import Any, Mapping, Sequence
+
+import torch
+from torch.utils.data import DataLoader
+
+from estimator import EstimatorFactory
+from metric.object_detection.robustness import (
+    AttackEvaluationResult,
+    evaluate_adversarial_robustness,
+)
+from method import load_config
+from model import load_model
+from fasterrcnn_test.load_dataset import load_data
+
+
+def _collate_detection(batch: Sequence):
+    images, targets = zip(*batch)
+    return list(images), list(targets)
+
+
+def _prepare_robustness_payload(config: Mapping[str, Any]) -> Mapping[str, Any]:
+    evaluation_config = config.get("evaluation") if isinstance(config, Mapping) else None
+    if isinstance(evaluation_config, Mapping) and "robustness" in evaluation_config:
+        return evaluation_config
+
+    if "robustness" in config:
+        return config
+
+    return {
+        "robustness": {
+            "adversarial": {
+                "metrics": [
+                    "map_drop_rate",
+                    "miss_rate",
+                    "false_detection_rate",
+                ],
+                "attacks": ["fgsm"],
+            }
+        }
+    }
+
+
+def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
+    if not results:
+        print("No attacks were enabled in the robustness configuration.")
+        return
+    for attack_name, result in results.items():
+        print(f"\n=== {attack_name} ===")
+        overall = result.overall
+        print(
+            "Overall - mAP drop: {0:.4f}, miss rate: {1:.4f}, false detection rate: {2:.4f}".format(
+                overall.map_drop_rate,
+                overall.miss_rate,
+                overall.false_detection_rate,
+            )
+        )
+        for rotation, metrics in result.by_rotation.items():
+            print(
+                "  Rotation {0}: mAP drop {1:.4f}, miss rate {2:.4f}, false detection rate {3:.4f}".format(
+                    rotation,
+                    metrics.map_drop_rate,
+                    metrics.miss_rate,
+                    metrics.false_detection_rate,
+                )
+            )
+
+
+def main(
+    model_config_path: str = "config/user/model_pytorch_det_fasterrcnn_adversarial.yaml",
+    num_workers: int = 0,
+) -> None:
+    # 1.加载配置文件
+    user_config = load_config(model_config_path)
+    model_instantiation_config = user_config["model"]["instantiation"]
+    model_estimator_config = user_config["model"]["estimator"]
+    evaluation_config = user_config["evaluation"]
+    print ("进度", "配置文件已加载完毕")
+
+    model = load_model(model_instantiation_config["model_path"], model_instantiation_config["model_name"]
+                       , model_instantiation_config["weight_path"], model_instantiation_config["parameters"])
+    print("进度", "模型初始化完成")
+
+    params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.SGD(params, lr=5e-3, momentum=0.9, weight_decay=5e-4)
+    loss = None
+
+    estimator = EstimatorFactory.create(
+        model=model,
+        loss=loss,
+        optimizer=optimizer,
+        config=model_estimator_config,
+    )
+
+    # 5.加载数据
+    test_loader = load_data("fasterrcnn_test/test")
+    print("进度", "数据集已加载")
+
+    # 6.根据传入的评测类型进行评测
+    print("开始执行检测流程测试...")
+
+
+
+    robustness_payload = _prepare_robustness_payload(user_config)
+
+    print("Running adversarial robustness evaluation...")
+    results = evaluate_adversarial_robustness(
+        estimator=estimator,
+        test_data={0.0: test_loader},
+        config=robustness_payload,
+        batch_size=2,
+    )
+    _print_results(results)
+
+    print("检测流程测试完成。")
+if __name__ == "__main__":
+    main()

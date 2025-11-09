@@ -1,0 +1,35 @@
+# PyTorch Faster R-CNN detection robustness configuration
+model:
+  instantiation:
+    model_path: "fasterrcnn_test/model.py"
+    weight_path: "fasterrcnn_test/dior_clean_best.pt"
+    model_name: "TorchvisionDetector"
+    parameters:
+      "num_classes": 20
+      "network": "fasterrcnn"
+      "pretrained": True
+      "trainable_backbone_layers": 3
+  estimator:
+    framework: "pytorch"
+    task: "object_detection"
+    parameters:
+      input_shape: [3, -1, -1]
+      clip_values: [0, 1]
+      device: "cuda"
+      device_type: "gpu"
+      batch_size: 1
+evaluation:
+  basic: ["map", "accuracy", "precision"]
+  robustness:
+    adversarial:
+      metrics: ["map_drop_rate", "miss_rate", "false_detection_rate"]
+      default_rotations: [0.0]
+      attacks:
+        fgsm:
+          metrics: ["map_drop_rate", "miss_rate", "false_detection_rate"]
+        pgd:
+          metrics: ["map_drop_rate", "miss_rate"]
+  interpretability: []
+  safety: []
+  generalization: []
+  fairness: []

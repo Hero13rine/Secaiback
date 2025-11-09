@@ -25,7 +25,7 @@ from fasterrcnn_test.load_dataset import load_data
 
 def main():
     # 0、定义关键参数
-    evaluation_path = "config/user/model_pytorch_cls_fasterrcnn.yaml"
+    evaluation_path = "config/user/model_pytorch_det_fasterrcnn.yaml"
     # 1.加载配置文件
     user_config = load_config(evaluation_path)
     model_instantiation_config = user_config["model"]["instantiation"]

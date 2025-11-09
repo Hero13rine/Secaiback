@@ -256,6 +256,7 @@ def cal_object_detection(estimator, test_loader, metrics: Dict[str, Union[List[s
         # 不进行ResultSender测试，只输出在控制台中
         print("状态: 成功")
         # ResultSender.send_status("成功")
+        # TODO   数据库逻辑
         print("进度: 目标检测评测结果已写回数据库")
         # ResultSender.send_log("进度", "目标检测评测结果已写回数据库")
     except Exception as exc:  # pylint: disable=broad-except
