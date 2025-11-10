@@ -15,7 +15,7 @@ from .adversarial import (
     AdversarialRobustnessEvaluator,
     AttackEvaluationResult,
     PredictionLike,
-    RotationRobustnessMetrics,
+    RobustnessMetrics,
 )
 
 
@@ -26,14 +26,12 @@ class AttackConfig:
     Attributes:
         name (str): 攻击名称
         enabled (bool): 是否启用此攻击评估，默认为True
-        rotations (Optional[Tuple[float, ...]]): 旋转角度列表，默认为None
         metrics (Optional[Tuple[str, ...]]): 要计算的指标列表，默认为None
         factory_config (Optional[Dict[str, Any]]): 攻击工厂配置，默认为None
     """
 
     name: str
     enabled: bool = True
-    rotations: Optional[Tuple[float, ...]] = None
     metrics: Optional[Tuple[str, ...]] = None
     factory_config: Optional[Dict[str, Any]] = None
 
@@ -57,7 +55,6 @@ def evaluate_adversarial_robustness(
     test_data: Union[Iterable, Mapping[Any, Iterable]],
     config: Optional[Mapping[str, Any]] = None,
     config_path: Optional[Union[str, Path]] = None,
-    use_rotated_iou: Optional[bool] = None,
     iou_threshold: float = 0.5,
     batch_size: int = 1,
 ) -> Dict[str, AttackEvaluationResult]:
@@ -67,11 +64,10 @@ def evaluate_adversarial_robustness(
         estimator: 能够预测检测输出的估计器。当它暴露了``get_core``方法时，
                    返回的ART估计器将用于攻击生成。
         test_data: 单个数据加载器/可迭代对象，产生 ``(images, targets)`` 批次，
-                   或者是从旋转角度到此类数据加载器的映射。
+                   或者是从任意键到此类数据加载器的映射。
                    图像应该是与 ``estimator`` 的 ``predict`` 方法兼容的张量。
-        config: 允许选择攻击、旋转和指标的解析后配置字典。
+        config: 允许选择攻击和指标的解析后配置字典。
         config_path: 包含配置的YAML文件的可选路径。
-        use_rotated_iou: 是否使用旋转IoU计算，如果为None则从配置中提取
         iou_threshold: 指标计算的IoU阈值。
         batch_size: 调用估计器进行预测时一起处理的样本数量。
 
@@ -83,32 +79,14 @@ def evaluate_adversarial_robustness(
     if config_path:
         config = load_robustness_config(config_path)
     config = config or {}
-    if use_rotated_iou is None:
-        use_rotated_iou = _extract_use_rotated_iou(config)
-    if use_rotated_iou is None:
-        raise ValueError("use_rotated_iou 参数是必需的，但在配置中未找到")
-
-    print(f"进度: 开始处理数据集...")
-    # 标准化测试数据格式
-    data_by_rotation = _normalize_test_data(test_data)
-    # 收集数据集
-    dataset = _collect_dataset(data_by_rotation)
-    if not dataset:
+    print("进度: 开始处理数据集...")
+    images, targets = _collect_dataset(test_data)
+    if not images:
         raise ValueError("测试数据必须至少提供一个样本")
     print("进度", "数据集已加载")
-    
-    # 存储每个旋转角度的真实标签和基线预测结果
-    ground_truths_by_rotation: Dict[float, List[PredictionLike]] = {}
-    baseline_predictions: Dict[float, List[PredictionLike]] = {}
 
-    # 对每个旋转角度的数据进行处理
-    total_rotations = len(dataset)
-    for idx, (rotation, (images, targets)) in enumerate(dataset.items(), 1):
-        print(f"进度: 处理旋转角度 {rotation} ({idx}/{total_rotations})...")
-        # 标准化真实标签
-        ground_truths_by_rotation[rotation] = [_normalize_target(target) for target in targets]
-        # 运行基线预测
-        baseline_predictions[rotation] = _run_predictions(estimator, images, batch_size=batch_size)
+    ground_truths: List[PredictionLike] = [_normalize_target(target) for target in targets]
+    baseline_predictions = _run_predictions(estimator, images, batch_size=batch_size)
 
     # 解析攻击配置
     print("进度: 解析攻击配置...")
@@ -119,59 +97,39 @@ def evaluate_adversarial_robustness(
     # 创建对抗鲁棒性评估器实例
     evaluator = AdversarialRobustnessEvaluator(
         iou_threshold=iou_threshold,
-        use_rotated_iou=use_rotated_iou,
     )
     results: Dict[str, AttackEvaluationResult] = {}
 
     # 对每种攻击进行评估
     total_attacks = len([attack for attack in attack_configs if attack.enabled])
     print(f"进度: 开始执行攻击流程测试，共 {total_attacks} 种攻击...")
-    
+
     processed_attacks = 0
     for attack in attack_configs:
         if not attack.enabled:
             continue
-        
+
         processed_attacks += 1
         print(f"进度: 处理攻击 '{attack.name}' ({processed_attacks}/{total_attacks})...")
-        
+
         # 实例化攻击对象
         attack_instance = _instantiate_attack(estimator, attack.factory_config)
-        attack_predictions: Dict[float, List[PredictionLike]] = {}
+        print("  进度: 生成对抗样本...")
+        adv_images = [
+            _generate_adversarial_image(attack_instance, image) for image in images
+        ]
+        attack_predictions = _run_predictions(
+            estimator,
+            adv_images,
+            batch_size=batch_size,
+        )
 
-        # 获取要使用的旋转角度
-        rotations_to_use = attack.rotations or tuple(dataset.keys())
-        total_rotations_for_attack = len(rotations_to_use)
-        
-        for rot_idx, rotation in enumerate(rotations_to_use, 1):
-            if rotation not in dataset:
-                raise KeyError(f"提供的数据中不包含旋转角度 {rotation}")
-            
-            print(f"  进度: 生成对抗样本 (旋转角度 {rotation}, {rot_idx}/{total_rotations_for_attack})...")
-            
-            # 获取原始图像
-            images, _ = dataset[rotation]
-            # 生成对抗图像
-            adv_images = [_generate_adversarial_image(attack_instance, image) for image in images]
-            # 对抗图像预测
-            attack_predictions[rotation] = _run_predictions(
-                estimator,
-                adv_images,
-                batch_size=batch_size,
-            )
-
-        # 过滤指定旋转角度的数据
-        selected_baseline = _filter_rotations(baseline_predictions, attack.rotations)
-        selected_ground_truths = _filter_rotations(ground_truths_by_rotation, attack.rotations)
-        selected_attack = _filter_rotations(attack_predictions, attack.rotations)
-
-        # 评估攻击效果
         print(f"  进度: 评估攻击效果...")
         result = evaluator.evaluate_attack(
             attack.name,
-            selected_baseline,
-            selected_attack,
-            selected_ground_truths,
+            baseline_predictions,
+            attack_predictions,
+            ground_truths,
             attack.metrics,
         )
         results[attack.name] = result
@@ -227,11 +185,10 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
     if not isinstance(adversarial_section, Mapping):
         return []
 
-    # 提取默认指标和旋转角度
+    # 提取默认指标
     default_metrics = _extract_metric_list(
         adversarial_section.get("default_metrics") or adversarial_section.get("metrics")
     )
-    default_rotations = _normalize_rotations(adversarial_section.get("default_rotations"))
     attacks_payload = adversarial_section.get("attacks")
 
     # 如果没有明确指定攻击，则根据默认指标创建FGSM攻击
@@ -242,7 +199,6 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
                 AttackConfig(
                     name="fgsm",
                     metrics=default_metrics,
-                    rotations=default_rotations,
                     factory_config={"method": "fgsm", "parameters": {}},
                 )
             ]
@@ -252,7 +208,7 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
     parsed: List[AttackConfig] = []
     if isinstance(attacks_payload, Mapping):
         for name, payload in attacks_payload.items():
-            attack = _build_attack_config(name, payload, default_metrics, default_rotations)
+            attack = _build_attack_config(name, payload, default_metrics)
             if attack:
                 parsed.append(attack)
     elif isinstance(attacks_payload, Sequence) and not isinstance(attacks_payload, (str, bytes)):
@@ -262,7 +218,6 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
                     AttackConfig(
                         name=payload,
                         metrics=default_metrics,
-                        rotations=default_rotations,
                         factory_config={"method": payload, "parameters": {}},
                     )
                 )
@@ -270,7 +225,7 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
                 name = payload.get("name") or payload.get("method")
                 if not name:
                     continue
-                attack = _build_attack_config(name, payload, default_metrics, default_rotations)
+                attack = _build_attack_config(name, payload, default_metrics)
                 if attack:
                     parsed.append(attack)
     else:
@@ -279,47 +234,10 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
     return [attack for attack in parsed if attack.enabled]
 
 
-def _extract_use_rotated_iou(config: Optional[Mapping[str, Any]]) -> bool:
-    """Read the rotated IoU requirement from the model section."""
-
-    if not isinstance(config, Mapping):
-        return False
-
-    model_section = config.get("model")
-    if not isinstance(model_section, Mapping):
-        return False
-
-    direct_flag = model_section.get("use_rotated_iou")
-    if isinstance(direct_flag, bool):
-        return direct_flag
-
-    instantiation = model_section.get("instantiation")
-    if isinstance(instantiation, Mapping):
-        instantiation_flag = instantiation.get("use_rotated_iou")
-        if isinstance(instantiation_flag, bool):
-            return instantiation_flag
-
-        instantiation_params = instantiation.get("parameters")
-        if isinstance(instantiation_params, Mapping):
-            param_flag = instantiation_params.get("use_rotated_iou")
-            if isinstance(param_flag, bool):
-                return param_flag
-
-    for key in ("base", "basic", "base_parameters", "parameters"):
-        nested = model_section.get(key)
-        if isinstance(nested, Mapping) and "use_rotated_iou" in nested:
-            flag = nested.get("use_rotated_iou")
-            if isinstance(flag, bool):
-                return flag
-
-    return False
-
-
 def _build_attack_config(
     name: str,
     payload: Any,
     default_metrics: Optional[Tuple[str, ...]],
-    default_rotations: Optional[Tuple[float, ...]],
 ) -> Optional[AttackConfig]:
     """构建攻击配置对象
     
@@ -327,7 +245,6 @@ def _build_attack_config(
         name (str): 攻击名称
         payload (Any): 攻击配置载荷
         default_metrics (Optional[Tuple[str, ...]]): 默认指标
-        default_rotations (Optional[Tuple[float, ...]]): 默认旋转角度
 
     Returns:
         Optional[AttackConfig]: 构建的攻击配置对象
@@ -339,7 +256,6 @@ def _build_attack_config(
             name=name,
             enabled=payload,
             metrics=default_metrics,
-            rotations=default_rotations,
             factory_config={"method": name, "parameters": {}},
         )
 
@@ -348,7 +264,6 @@ def _build_attack_config(
         return AttackConfig(
             name=name,
             metrics=default_metrics,
-            rotations=default_rotations,
             factory_config={"method": name, "parameters": {}},
         )
 
@@ -358,7 +273,6 @@ def _build_attack_config(
         return AttackConfig(
             name=name,
             metrics=default_metrics,
-            rotations=default_rotations,
             factory_config={"method": method_name, "parameters": {}},
         )
 
@@ -368,7 +282,6 @@ def _build_attack_config(
         return AttackConfig(
             name=name,
             metrics=metrics,
-            rotations=default_rotations,
             factory_config={"method": name, "parameters": {}},
         )
 
@@ -378,7 +291,6 @@ def _build_attack_config(
 
     # 处理字典类型的payload
     enabled = bool(payload.get("enabled", True))
-    rotations = _normalize_rotations(payload.get("rotations")) or default_rotations
     metrics = _extract_metric_list(
         payload.get("metrics") or payload.get("outputs"), default_metrics
     )
@@ -399,7 +311,6 @@ def _build_attack_config(
     return AttackConfig(
         name=name,
         enabled=enabled,
-        rotations=rotations,
         metrics=metrics,
         factory_config=factory_config,
     )
@@ -449,121 +360,30 @@ def _extract_metric_list(
     return fallback
 
 
-def _normalize_rotations(rotations: Any) -> Optional[Tuple[float, ...]]:
-    """标准化旋转角度
-    
-    Args:
-        rotations (Any): 旋转角度配置
-
-    Returns:
-        Optional[Tuple[float, ...]]: 标准化后的旋转角度元组
-    """
-    
-    # 处理None值
-    if rotations is None:
-        return None
-    
-    # 处理数值类型
-    if isinstance(rotations, (int, float)):
-        return (float(rotations),)
-    
-    # 处理序列类型
-    if isinstance(rotations, Sequence) and not isinstance(rotations, (str, bytes)):
-        normalized: List[float] = []
-        for item in rotations:
-            try:
-                normalized.append(float(item))
-            except (TypeError, ValueError):
-                continue
-        return tuple(sorted(set(normalized))) if normalized else None
-    
-    return None
-
-
-def _filter_rotations(
-    mapping: Mapping[float, Sequence[PredictionLike]],
-    rotations: Optional[Tuple[float, ...]],
-) -> Dict[float, Sequence[PredictionLike]]:
-    """过滤指定旋转角度的数据
-    
-    Args:
-        mapping (Mapping[float, Sequence[PredictionLike]]): 原始数据映射
-        rotations (Optional[Tuple[float, ...]]): 要过滤的旋转角度
-
-    Returns:
-        Dict[float, Sequence[PredictionLike]]: 过滤后的数据
-    """
-    
-    # 如果未指定旋转角度，则返回所有数据
-    if not rotations:
-        return dict(mapping)
-    
-    # 过滤指定旋转角度的数据
-    filtered: Dict[float, Sequence[PredictionLike]] = {}
-    for rotation in rotations:
-        if rotation not in mapping:
-            raise KeyError(f"提供的数据中不包含旋转角度 {rotation}")
-        filtered[rotation] = mapping[rotation]
-    
-    return filtered
-
-
-def _normalize_test_data(
-    test_data: Union[Iterable, Mapping[Any, Iterable]]
-) -> Dict[float, Iterable]:
-    """标准化测试数据格式
-    
-    Args:
-        test_data (Union[Iterable, Mapping[Any, Iterable]]): 原始测试数据
-
-    Returns:
-        Dict[float, Iterable]: 标准化后的测试数据
-    """
-    
-    # 如果是字典类型，则尝试转换键为浮点数
-    if isinstance(test_data, Mapping):
-        normalized: Dict[float, Iterable] = {}
-        for key, loader in test_data.items():
-            try:
-                rotation = float(key)
-            except (TypeError, ValueError):
-                continue
-            normalized[rotation] = loader
-        return normalized
-    
-    # 否则默认旋转角度为0.0
-    return {0.0: test_data}
-
-
 def _collect_dataset(
-    data_by_rotation: Mapping[float, Iterable]
-) -> Dict[float, Tuple[List[torch.Tensor], List[Mapping[str, Any]]]]:
-    """收集数据集
-    
-    Args:
-        data_by_rotation (Mapping[float, Iterable]): 按旋转角度组织的数据
+    test_data: Union[Iterable, Mapping[Any, Iterable]]
+) -> Tuple[List[torch.Tensor], List[Mapping[str, Any]]]:
+    """收集数据集"""
 
-    Returns:
-        Dict[float, Tuple[List[torch.Tensor], List[Mapping[str, Any]]]]: 收集的数据集
-    """
-    
-    dataset: Dict[float, Tuple[List[torch.Tensor], List[Mapping[str, Any]]]] = {}
-    
-    # 遍历每个旋转角度的数据
-    for rotation, loader in data_by_rotation.items():
-        images: List[torch.Tensor] = []
-        targets: List[Mapping[str, Any]] = []
-        
-        # 从数据加载器中提取图像和目标
+    images: List[torch.Tensor] = []
+    targets: List[Mapping[str, Any]] = []
+
+    if isinstance(test_data, Mapping):
+        loaders = list(test_data.values())
+    else:
+        loaders = [test_data]
+
+    for loader in loaders:
         for images_batch, targets_batch in loader:
-            for image in _to_sequence(images_batch):
+            image_list = _to_sequence(images_batch)
+            target_list = _to_sequence(targets_batch)
+            if len(image_list) != len(target_list):
+                raise ValueError("图像与标注的数量不匹配")
+            for image, target in zip(image_list, target_list):
                 images.append(_clone_image(image))
-            for target in _to_sequence(targets_batch):
                 targets.append(_normalize_target(target))
-        
-        dataset[rotation] = (images, targets)
-    
-    return dataset
+
+    return images, targets
 
 
 def _run_predictions(
@@ -803,7 +623,7 @@ def _to_numpy_image(image: Any) -> np.ndarray:
 __all__ = [
     "AttackConfig",
     "AttackEvaluationResult",
-    "RotationRobustnessMetrics",
+    "RobustnessMetrics",
     "evaluate_adversarial_robustness",
     "load_robustness_config",
 ]

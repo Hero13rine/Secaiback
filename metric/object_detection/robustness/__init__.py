@@ -3,14 +3,14 @@
 from .adversarial import (
     AdversarialRobustnessEvaluator,
     AttackEvaluationResult,
-    RotationRobustnessMetrics,
+    RobustnessMetrics,
 )
 from .eval_robustness import evaluate_adversarial_robustness, load_robustness_config
 
 __all__ = [
     "AdversarialRobustnessEvaluator",
     "AttackEvaluationResult",
-    "RotationRobustnessMetrics",
+    "RobustnessMetrics",
     "evaluate_adversarial_robustness",
     "load_robustness_config",
 ]
