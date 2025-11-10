@@ -5,19 +5,38 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from utils.SecAISender import ResultSender
 
 def cal_basic(estimator, test_loader, metrics):
+    estimator.get_core().model.eval()
     try:
         # 收集运行结果
         all_preds = []
         all_labels = []
         ResultSender.send_log("进度", "开始收集网络输出")
         for images, labels in test_loader:
+            # 转换为numpy数组（保持原始维度信息）
             images_np = images.numpy()
             labels_np = labels.numpy()
-            outputs = estimator.predict(images_np)
-            preds = np.argmax(outputs, axis=1)
-
+            # 根据数据维度判断处理方式（4维单图/5维10折裁剪）
+            if len(images_np.shape) == 5:  # (bs, ncrops, c, h, w)，对应10折裁剪数据
+                bs, ncrops, c, h, w = images_np.shape
+                # 展平裁剪维度：(bs*ncrops, c, h, w)
+                images_flat = images_np.reshape(-1, c, h, w)
+                # 模型预测
+                outputs = estimator.predict(images_flat)
+                # 按裁剪维度取平均：(bs, ncrops, num_classes) -> (bs, num_classes)
+                outputs_avg = outputs.reshape(bs, ncrops, -1).mean(axis=1)
+                # 计算预测结果
+                preds = np.argmax(outputs_avg, axis=1)
+            elif len(images_np.shape) == 4:  # (bs, c, h, w)，对应单图输入
+                # 直接预测
+                outputs = estimator.predict(images_np)
+                preds = np.argmax(outputs, axis=1)
+            else:
+                raise ValueError(f"不支持的数据维度：{images_np.shape}，仅支持4维或5维")
+            
+            # 收集结果（注意labels需要展平为1维）
             all_preds.extend(preds)
-            all_labels.extend(labels)
+            all_labels.extend(labels_np.flatten())  # 确保labels是1维列表
+        print(all_preds, all_labels)
 
         ResultSender.send_log("进度", "网络输出收集完成")
         ResultSender.send_log("进度", "开始计算"+str(metrics.get('performance_testing', [])))
