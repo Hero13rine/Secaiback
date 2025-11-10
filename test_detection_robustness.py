@@ -51,23 +51,14 @@ def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
         return
     for attack_name, result in results.items():
         print(f"\n=== {attack_name} ===")
-        overall = result.overall
+        metrics = result.metrics
         print(
             "Overall - mAP drop: {0:.4f}, miss rate: {1:.4f}, false detection rate: {2:.4f}".format(
-                overall.map_drop_rate,
-                overall.miss_rate,
-                overall.false_detection_rate,
+                metrics.map_drop_rate,
+                metrics.miss_rate,
+                metrics.false_detection_rate,
             )
         )
-        for rotation, metrics in result.by_rotation.items():
-            print(
-                "  Rotation {0}: mAP drop {1:.4f}, miss rate {2:.4f}, false detection rate {3:.4f}".format(
-                    rotation,
-                    metrics.map_drop_rate,
-                    metrics.miss_rate,
-                    metrics.false_detection_rate,
-                )
-            )
 
 
 def main(
@@ -115,10 +106,9 @@ def main(
     print("Running adversarial robustness evaluation...")
     results = evaluate_adversarial_robustness(
         estimator=estimator,
-        test_data={0.0: test_loader},
+        test_data=test_loader,
         config=robustness_payload,
         batch_size=1,
-        use_rotated_iou = model_instantiation_config["parameters"]["use_rotated_iou"]
     )
     _print_results(results)
 
