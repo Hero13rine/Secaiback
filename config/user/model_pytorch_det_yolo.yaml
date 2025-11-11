@@ -10,7 +10,7 @@ model:
       
   estimator:
     framework: "pytorch"
-    task: "object_detection"
+    task: "detection"
     parameters:
       input_shape: [3, 640, 640]
       clip_values: [0, 1]

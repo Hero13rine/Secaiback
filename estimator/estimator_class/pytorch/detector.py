@@ -8,7 +8,7 @@ from art.estimators.object_detection import PyTorchObjectDetector
 from estimator.estimator_factory import EstimatorFactory
 
 
-@EstimatorFactory.register(framework="pytorch", task="object_detection")
+@EstimatorFactory.register(framework="pytorch", task="detection")
 class PyTorchObjectDetectionWrapper:
     def __init__(
         self,
