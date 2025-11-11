@@ -448,7 +448,7 @@ def evaluate_robustness_corruptions(test_loader, estimator, metrics):
                                 # 只有当原始预测正确且扰动后预测错误时才保存图像
                                 if clean_predicted[0] == labels[i].item() and predicted[0] != labels[i].item():
                                     filename = save_corruption_comparison(
-                                        image, corrupted_image.squeeze().permute(1, 2, 0).numpy() * 255,
+                                        image, corrupted_image.permute(1, 2, 0).numpy() * 255,
                                         labels[i].item(), clean_predicted[0], predicted[0],
                                         saved_images_count, save_dir, corruption_function.__name__, severity
                                     )
