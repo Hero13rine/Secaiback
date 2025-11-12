@@ -5,7 +5,6 @@ import numpy as np
 import torch
 from torch import optim
 
-from data.load_dataset import load_cifar_train_test
 from metric.classification.basic.basic import cal_basic
 from metric.classification.generalization.generalization import evaluate_generalization
 from metric.classification.interpretability.shap.GradientShap import GradientShap
