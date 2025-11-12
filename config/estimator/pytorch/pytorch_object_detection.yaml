@@ -1,7 +1,7 @@
 # PyTorch目标检测估计器参数规范
 metadata:
   framework: pytorch
-  task: object_detection
+  task: detection
 
 parameters:
   required:
