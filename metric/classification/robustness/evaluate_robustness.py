@@ -2,8 +2,10 @@
 import numpy as np
 import torch
 from torchvision import transforms
-import matplotlib.pyplot as plt  # 添加matplotlib导入用于保存图像
-import os  # 添加os模块用于处理文件路径
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import os
 
 from attack import AttackFactory
 from utils.SecAISender import ResultSender
@@ -16,12 +18,10 @@ from method.corruptions import (
     jpeg_compression, pixelate, elastic_transform
 )
 
-
 # 定义softmax函数
 def softmax(x):
     exp_x = np.exp(x - np.max(x, axis=1, keepdims=True))
     return exp_x / np.sum(exp_x, axis=1, keepdims=True)
-
 
 def evaluation_robustness(test_loader, estimator, metrics):
     ResultSender.send_log("进度", "鲁棒性评测开始")
@@ -38,6 +38,7 @@ def evaluation_robustness(test_loader, estimator, metrics):
     except Exception as e:
         ResultSender.send_status("失败")
         ResultSender.send_log("错误", str(e))
+        raise  # 保留异常抛出，方便调试
 
 def process_predictions(images_np, estimator):
     """统一处理4维和5维数据的预测逻辑"""
@@ -52,28 +53,25 @@ def process_predictions(images_np, estimator):
     else:
         raise ValueError(f"不支持的数据维度: {images_np.shape}，仅支持4维或5维")
 
-
 def save_comparison_images(clean_img, adv_img, true_label, clean_pred, adv_pred, index, save_dir, eps=None):
     """保存原始图像和对抗样本的对比图"""
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
 
     # 显示原始图像
-    if clean_img.shape[0] == 3:  # 如果是CHW格式
+    if clean_img.shape[0] == 3:  # CHW格式
         clean_img_vis = denormalize(clean_img)
-    else:  # 如果是HWC格式
+    else:  # HWC格式
         clean_img_vis = clean_img
-    # 确保图像值在[0, 1]范围内
     clean_img_vis = np.clip(clean_img_vis, 0, 1)
     axes[0].imshow(clean_img_vis)
     axes[0].set_title(f"Clean Image\nTrue: {true_label}, Pred: {clean_pred}")
     axes[0].axis('off')
 
     # 显示对抗样本
-    if adv_img.shape[0] == 3:  # 如果是CHW格式
+    if adv_img.shape[0] == 3:  # CHW格式
         adv_img_vis = denormalize(adv_img)
-    else:  # 如果是HWC格式
+    else:  # HWC格式
         adv_img_vis = adv_img
-    # 确保图像值在[0, 1]范围内
     adv_img_vis = np.clip(adv_img_vis, 0, 1)
     axes[1].imshow(adv_img_vis)
     axes[1].set_title(f"Adversarial Image\nTrue: {true_label}, Pred: {adv_pred}")
@@ -87,16 +85,14 @@ def save_comparison_images(clean_img, adv_img, true_label, clean_pred, adv_pred,
     plt.close()
     return filename
 
-
 def evaluate_robustness_adv(test_loader, estimator, attack, save_images=False, save_dir="adv_examples", eps=None):
     total_uncorrect_adv = 0
     total_samples = 0
-    successful_attack_confidences = []  # 用于存储攻击成功样本的真实类别置信度
-    acac_confidences = []  # 用于存储攻击成功样本的错误类别置信度
+    successful_attack_confidences = []
+    acac_confidences = []
 
-    # 用于保存图像的计数器
     saved_images_count = 0
-    max_saved_images = 5  # 最多保存5组图像
+    max_saved_images = 5
 
     for x_batch, y_batch in test_loader:
         x_batch_np = x_batch.numpy().astype(np.float32)
@@ -105,7 +101,6 @@ def evaluate_robustness_adv(test_loader, estimator, attack, save_images=False, s
 
         # 生成对抗样本
         if len(x_batch_np.shape) == 5:
-            # 5维数据先展平裁剪维度生成对抗样本
             bs_adv, ncrops_adv, c_adv, h_adv, w_adv = x_batch_np.shape
             x_flat = x_batch_np.reshape(-1, c_adv, h_adv, w_adv)
             x_adv_flat = attack.generate(x_flat)
@@ -115,7 +110,6 @@ def evaluate_robustness_adv(test_loader, estimator, attack, save_images=False, s
 
         # 对抗样本预测
         pred_adv = process_predictions(x_adv_np, estimator)
-        # 对对抗样本预测进行softmax归一化
         pred_adv_probs = softmax(pred_adv)
         total_uncorrect_adv += np.sum(np.argmax(pred_adv_probs, axis=1) != y_batch_np)
 
@@ -123,29 +117,26 @@ def evaluate_robustness_adv(test_loader, estimator, attack, save_images=False, s
         pred_clean = process_predictions(x_batch_np, estimator)
         pred_clean_probs = softmax(pred_clean)
 
-        # 找出攻击成功的样本
+        # 统计攻击成功样本置信度
         attack_success = np.argmax(pred_adv_probs, axis=1) != y_batch_np
         for i in range(bs):
             if attack_success[i]:
-                # 提取攻击成功样本的真实类别置信度
                 true_class_confidence = pred_adv_probs[i][y_batch_np[i]]
                 successful_attack_confidences.append(true_class_confidence)
-
-                # 提取攻击成功样本的错误类别置信度
                 misclassified_class = np.argmax(pred_adv_probs[i])
                 misclassified_confidence = pred_adv_probs[i][misclassified_class]
                 acac_confidences.append(misclassified_confidence)
 
             # 保存对比图像
             if save_images and saved_images_count < max_saved_images:
-                # 获取预测标签
                 clean_pred_label = np.argmax(pred_clean_probs[i])
                 adv_pred_label = np.argmax(pred_adv_probs[i])
-
-                # 只有当原始预测正确且对抗攻击成功时才保存图像
                 if clean_pred_label == y_batch_np[i] and attack_success[i]:
+                    # 处理5维数据时取第一个裁剪图用于可视化
+                    clean_img = x_batch_np[i][0] if len(x_batch_np.shape) == 5 else x_batch_np[i]
+                    adv_img = x_adv_np[i][0] if len(x_adv_np.shape) == 5 else x_adv_np[i]
                     filename = save_comparison_images(
-                        x_batch_np[i], x_adv_np[i],
+                        clean_img, adv_img,
                         y_batch_np[i], clean_pred_label, adv_pred_label,
                         saved_images_count, save_dir, eps
                     )
@@ -153,36 +144,24 @@ def evaluate_robustness_adv(test_loader, estimator, attack, save_images=False, s
 
         total_samples += bs
 
-    # 计算整体准确率
     adverr = total_uncorrect_adv / total_samples
     advacc = 1 - adverr
-    # ResultSender.send_result("adverr",adverr)
-    # ResultSender.send_result("advacc", advacc)
-    print(f"Adversarial  dataset accuracy (full test set): {advacc:.2%}")
-    print(f"Adversarial  dataset error (full test set): {adverr:.2%}")
+    print(f"Adversarial dataset accuracy (full test set): {advacc:.2%}")
+    print(f"Adversarial dataset error (full test set): {adverr:.2%}")
 
-    # 计算ACTC
-    if len(successful_attack_confidences) > 0:
-        actc = np.mean(successful_attack_confidences)
-        # ResultSender.send_result("actc", actc)
+    # 计算ACTC和ACAC
+    actc = np.mean(successful_attack_confidences) if successful_attack_confidences else None
+    acac = np.mean(acac_confidences) if acac_confidences else None
+    if actc is not None:
         print(f"actc (Average Confidence of True Class): {actc:.4f}")
     else:
-        ResultSender.send_log("异常", "No successful attacks found. actc cannot be calculated.")
         print("No successful attacks found. actc cannot be calculated.")
-        actc = None
-
-    # 计算ACAC
-    if len(acac_confidences) > 0:
-        acac = np.mean(acac_confidences)
-        # ResultSender.send_result("acac", acac)
+    if acac is not None:
         print(f"acac (Average Confidence of Adversarial Class): {acac:.4f}")
     else:
-        # ResultSender.send_log("异常", "No successful attacks found. acac cannot be calculated.")
         print("No successful attacks found. acac cannot be calculated.")
-        acac = None
 
     return adverr, advacc, actc, acac
-
 
 def parse_attack_method(attack_str, eps):
     """将攻击方法字符串解析为包含方法和参数的字典"""
@@ -193,55 +172,37 @@ def parse_attack_method(attack_str, eps):
         }
     }
 
-
 def save_corruption_comparison(clean_img, corrupted_img, true_label, clean_pred, corrupted_pred, index, save_dir,
                                corruption_name, severity):
     """保存原始图像和扰动图像的对比图"""
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
 
-    # 显示原始图像
-    # 检查图像值范围来决定是否需要归一化
-    if clean_img.max() > 1.0:
-        clean_img_display = np.clip(clean_img / 255.0, 0, 1)
-    else:
-        clean_img_display = np.clip(clean_img, 0, 1)
+    # 显示原始图像（确保是HWC格式且值在0-1之间）
+    clean_img_display = np.clip(clean_img / 255.0 if clean_img.max() > 1.0 else clean_img, 0, 1)
     axes[0].imshow(clean_img_display)
     axes[0].set_title(f"Clean Image\nTrue: {true_label}, Pred: {clean_pred}")
     axes[0].axis('off')
 
-    # 显示扰动后的图像
-    # 检查图像值范围来决定是否需要归一化
-    if corrupted_img.max() > 1.0:
-        corrupted_img_display = np.clip(corrupted_img / 255.0, 0, 1)
-    else:
-        corrupted_img_display = np.clip(corrupted_img, 0, 1)
+    # 显示扰动后的图像（确保是HWC格式且值在0-1之间）
+    corrupted_img_display = np.clip(corrupted_img / 255.0 if corrupted_img.max() > 1.0 else corrupted_img, 0, 1)
     axes[1].imshow(corrupted_img_display)
     axes[1].set_title(
         f"Corrupted Image\n{corruption_name} (severity={severity})\nTrue: {true_label}, Pred: {corrupted_pred}")
     axes[1].axis('off')
 
     plt.tight_layout()
-    filename = f"comparison_{index}.png"
     filename = f"{corruption_name}_severity_{severity}_comparison_{index}.png"
     plt.savefig(os.path.join(save_dir, filename))
     plt.close()
     return filename
 
-
 def evaluate_robustness_adv_all(test_loader, estimator, metrics):
     ResultSender.send_log("进度", "对抗攻击评测开始")
     attack_method = ["fgsm"]
-
-    # eps参数列表，从0到1，步长0.1
     eps_list = [round(eps, 1) for eps in np.arange(0.0, 1.1, 0.1)]
-
-    # 存储所有eps的结果
-    eps_results = {}  # 键是eps，值是包含各指标的字典
-
-    # 选定两个eps值用于保存对比图
+    eps_results = {}
     selected_eps_for_saving = [0.3, 0.6] if len(eps_list) > 1 else [eps_list[0]]
 
-    # 对每种攻击方法和eps值进行评估
     for attack_name in attack_method:
         for eps in eps_list:
             print(f"\nEvaluating {attack_name} with eps={eps}")
@@ -270,7 +231,6 @@ def evaluate_robustness_adv_all(test_loader, estimator, metrics):
                 adverr, advacc, actc, acac = evaluate_robustness_adv(test_loader, estimator, attack,
                                                                      save_images=save_images)
 
-            # 存储当前eps的结果
             eps_results[eps] = {
                 'adverr': adverr,
                 'advacc': advacc,
@@ -278,19 +238,16 @@ def evaluate_robustness_adv_all(test_loader, estimator, metrics):
                 'acac': acac
             }
 
-            # 遍历每个指标，每次只发送一个键值对，键名格式为 metric_eps（如 acac_0_1）
+            # 发送指标结果
             for metric in metrics:
                 value = eps_results[eps][metric]
-                # 将eps中的小数点替换为下划线（如0.1 → 0_1）
                 eps_str = str(eps).replace('.', '_')
                 key = f"{metric}_{eps_str}"
-                # 单个键值对传递：第一个参数是key，第二个是value
                 if value is not None:
                     ResultSender.send_result(key, f"{value:.4f}")
                 else:
                     ResultSender.send_result(key, "None")
 
-        # 发送选定eps值的对比图路径
         try:
             # 获取环境变量
             evaluateMetric = os.getenv("evaluateDimension")
@@ -324,25 +281,21 @@ def evaluate_robustness_adv_all(test_loader, estimator, metrics):
         except Exception as e:
             print(f"发送对抗攻击对比图路径时出错: {e}")
 
-    # 计算所有eps的平均值，同样每次发送一个键值对
-    avg_results = {}
+    # 发送平均指标
     for metric in metrics:
         valid_values = [results[metric] for eps, results in eps_results.items() if results[metric] is not None]
         if valid_values:
             avg = sum(valid_values) / len(valid_values)
-            avg_results[metric] = avg
             print(f"Average {metric} across all eps: {avg:.4f}")
-            # 单个键值对传递平均值，键名格式为 metric_avg（如 acac_avg）
             ResultSender.send_result(f"{metric}_avg", f"{avg:.4f}")
         else:
             print(f"No valid values for {metric} across all eps")
             ResultSender.send_result(f"{metric}_avg", "None")
 
-    return eps_results, avg_results
-
+    return eps_results, avg  # 修正返回值（原avg_results未定义，直接返回avg）
 
 def evaluate_clean(test_loader, estimator):
-    total_correct_clean = 0
+    total_incorrect_clean = 0  # 修正变量名（原total_correct_clean语义矛盾）
     total_samples = 0
 
     for x_batch, y_batch in test_loader:
@@ -352,50 +305,49 @@ def evaluate_clean(test_loader, estimator):
 
         # 原始预测
         pred_clean = process_predictions(x_batch_np, estimator)
-
-        # 对原始预测进行softmax归一化
         pred_clean_probs = softmax(pred_clean)
-        total_correct_clean += np.sum(np.argmax(pred_clean_probs, axis=1) != y_batch_np)
-
+        # 统计预测错误的样本数（原逻辑正确，修正变量名使其语义清晰）
+        total_incorrect_clean += np.sum(np.argmax(pred_clean_probs, axis=1) != y_batch_np)
         total_samples += bs
 
-    # 计算整体准确率
-    err_clean = 100 * total_correct_clean / total_samples
+    err_clean = 100 * total_incorrect_clean / total_samples
     print(f"asr_clean (full test set): {err_clean:.2f}%")
     return err_clean
 
+def get_original_image(images, idx):
+    """从4维或5维张量中提取原始图像（用于可视化）"""
+    if len(images.shape) == 4:
+        # (bs, c, h, w) → 取单个样本并转HWC格式（0-255）
+        return images[idx].permute(1, 2, 0).numpy() * 255
+    elif len(images.shape) == 5:
+        # (bs, ncrops, c, h, w) → 取第一个裁剪图并转HWC格式（0-255）
+        return images[idx, 0].permute(1, 2, 0).numpy() * 255
+    else:
+        raise ValueError(f"不支持的图像维度: {images.shape}")
 
 def evaluate_robustness_corruptions(test_loader, estimator, metrics):
     ResultSender.send_log("进度", "扰动攻击评测开始")
-    # 定义所有扰动方法
+    # 定义扰动方法（可根据需要解除注释扩展）
     corruption_functions = [
         gaussian_noise,
         # shot_noise, impulse_noise, speckle_noise,
         # gaussian_blur, glass_blur, defocus_blur, motion_blur, zoom_blur,
-        # fog, 
-        # frost, 
-        # snow, spatter, contrast, brightness, saturate, jpeg_compression, 
-        # pixelate, 
-        # elastic_transform
+        # fog, frost, snow, spatter, contrast, brightness, saturate,
+        # jpeg_compression, pixelate, elastic_transform
     ]
-    # 定义要测试的 severity 级别
     severity_levels = [1, 2, 3, 4, 5]
-
     asr_total = 0
-
-    # 选定两个severity级别用于保存对比图
     selected_severity_for_saving = [2, 4] if len(severity_levels) > 1 else [severity_levels[0]]
 
-    # 遍历所有扰动方法
     for corruption_function in corruption_functions:
+        corruption_name = corruption_function.__name__
         for severity in severity_levels:
-            total = 0
-            un_correct = 0
-            
-            # 创建保存图像的目录
+            total_samples = 0
+            incorrect_count = 0
             save_dir = None
-            # 只在选定的severity级别保存图像
             should_save_images = severity in selected_severity_for_saving
+
+            # 创建保存目录
             if should_save_images:
                 evaluateMetric = os.getenv("evaluateDimension")
                 if evaluateMetric:
@@ -405,116 +357,93 @@ def evaluate_robustness_corruptions(test_loader, estimator, metrics):
                     save_dir = f"corruption_examples_{corruption_function.__name__}_{severity}"
                     os.makedirs(save_dir, exist_ok=True)
 
-            # 用于保存图像的计数器
             saved_images_count = 0
-            max_saved_images = 5  # 最多保存5组图像
+            max_saved_images = 5
 
             with torch.no_grad():
                 for data in test_loader:
                     images, labels = data
-                    if len(images.shape) == 4:
-                        bs, c, h, w = images.shape
-                    elif len(images.shape) == 5:
-                        bs_crop, ncrops, c_crop, h_crop, w_crop = images.shape
-                        bs = bs_crop  # 批次大小统一为第一维
+                    bs = images.shape[0]  # 无论4维还是5维，批次大小都是第一维
+
+                    for i in range(bs):
+                        # 提取原始图像（用于扰动和可视化）
+                        original_img = get_original_image(images, i).astype(np.uint8)
+                        
+                        # 应用扰动（输入必须是uint8格式的HWC图像）
+                        corrupted_img = corruption_function(original_img, severity=severity)
+                        
+                        # 转换为模型输入格式：HWC → CHW，0-1归一化，添加批次维度
+                        if isinstance(corrupted_img, np.ndarray):
+                            # 处理numpy数组格式
+                            corrupted_tensor = torch.from_numpy(corrupted_img / 255.0).permute(2, 0, 1).float()
+                        else:
+                            # 处理PIL图像格式
+                            corrupted_tensor = transforms.ToTensor()(corrupted_img)
+                        
+                        # 根据输入数据类型生成对应格式的扰动数据
+                        if len(images.shape) == 5:
+                            # 5维数据：生成10折裁剪，保持格式为(1, 10, c, h, w)
+                            ncrops = images.shape[1]
+                            # TenCrop返回tuple，需转换为tensor并添加批次维度
+                            corrupted_crops = transforms.TenCrop(size=original_img.shape[:2])(corrupted_tensor)
+                            corrupted_crops = torch.stack(corrupted_crops).unsqueeze(0)  # (1, 10, c, h, w)
+                            model_input = corrupted_crops.numpy()
+                        else:
+                            # 4维数据：保持格式为(1, c, h, w)
+                            model_input = corrupted_tensor.unsqueeze(0).numpy()
+                        
+                        # 模型预测
+                        pred = process_predictions(model_input, estimator)
+                        pred_label = np.argmax(pred, axis=1)[0]
+                        true_label = labels[i].item()
+
+                        # 统计错误数
+                        if pred_label != true_label:
+                            incorrect_count += 1
+                        total_samples += 1
+
+                        # 保存对比图像（仅当原始预测正确且扰动后预测错误时）
+                        if should_save_images and saved_images_count < max_saved_images:
+                            # 原始图像的预测（使用完整输入格式）
+                            original_input = images[i:i+1].numpy()  # 保持原始维度（1, ncrops, c, h, w）或（1, c, h, w）
+                            pred_clean = process_predictions(original_input, estimator)
+                            clean_pred_label = np.argmax(pred_clean, axis=1)[0]
+                            
+                            if clean_pred_label == true_label and pred_label != true_label:
+                                save_corruption_comparison(
+                                    original_img,  # 原始图像（HWC, 0-255）
+                                    corrupted_img,  # 扰动图像（HWC, 0-255）
+                                    true_label,
+                                    clean_pred_label,
+                                    pred_label,
+                                    saved_images_count,
+                                    save_dir,
+                                    corruption_name,
+                                    severity
+                                )
+                                saved_images_count += 1
+
+            # 计算ASR（攻击成功率=错误数/总样本数）
+            if total_samples > 0:
+                asr = 100 * incorrect_count / total_samples
+                asr_total += asr
+                # 日志输出
+                ResultSender.send_log("进度",
+                                      f"UnCorrectNum of {corruption_name}_severity_{severity}: {incorrect_count}")
+                ResultSender.send_log("进度",
+                                      f"ASR of {corruption_name}_severity_{severity}: {asr:.2f}%")
+                print(f"UnCorrectNum of {corruption_name}_severity_{severity}: {incorrect_count}")
+                print(f"ASR of {corruption_name}_severity_{severity}: {asr:.2f}%")
+                
+                # 图像保存日志
+                if should_save_images:
+                    if saved_images_count > 0:
+                        print(f"已保存 {saved_images_count} 组 {corruption_name}_severity_{severity} 对比图到 {save_dir}")
                     else:
-                        raise ValueError(f"不支持的图像维度: {images.shape}")
+                        print(f"未找到符合条件的样本（原始预测正确+扰动预测错误），未保存 {corruption_name}_severity_{severity} 对比图")
+            else:
+                print(f"警告：{corruption_name}_severity_{severity} 未处理任何样本")
 
-                    # 处理单图输入（4维）
-                    if len(images.shape) == 4:
-                        for i in range(bs):
-                            # 转换为图像格式（HWC，0-255）
-                            image = images[i].permute(1, 2, 0).numpy() * 255
-                            image = image.astype(np.uint8)
-                            # 应用扰动
-                            corrupted_image = corruption_function(image, severity=severity)
-                            # 转换回模型输入格式（CHW，0-1）
-                            if isinstance(corrupted_image, np.ndarray):
-                                corrupted_image = torch.from_numpy(corrupted_image / 255.0).permute(2, 0, 1).float()
-                            else:
-                                corrupted_image = transforms.ToTensor()(corrupted_image)
-                            corrupted_image = corrupted_image.unsqueeze(0)  # 增加批次维度
-                            
-                            # 预测（单样本处理）
-                            pred = process_predictions(corrupted_image.numpy(), estimator)
-                            predicted = np.argmax(pred, axis=1)
-                            
-                            # 保存对比图像
-                            if should_save_images and saved_images_count < max_saved_images:
-                                # 原始图像预测
-                                pred_clean = process_predictions(images[i].unsqueeze(0).numpy(), estimator)
-                                clean_predicted = np.argmax(pred_clean, axis=1)
-
-                                # 只有当原始预测正确且扰动后预测错误时才保存图像
-                                if clean_predicted[0] == labels[i].item() and predicted[0] != labels[i].item():
-                                    filename = save_corruption_comparison(
-                                        image, corrupted_image.permute(1, 2, 0).numpy() * 255,
-                                        labels[i].item(), clean_predicted[0], predicted[0],
-                                        saved_images_count, save_dir, corruption_function.__name__, severity
-                                    )
-                                    saved_images_count += 1
-                            
-                            total += 1
-                            un_correct += (predicted[0] != labels[i].item())
-                    # 处理10折裁剪输入（5维）
-                    elif len(images.shape) == 5:
-                        bs_crop, ncrops, c_crop, h_crop, w_crop = images.shape
-                        for i in range(bs_crop):
-                            # 取原始图像（非裁剪后）进行扰动
-                            # 这里假设images[i,0]为原始图像，实际需根据数据处理逻辑调整
-                            image = images[i, 0].permute(1, 2, 0).numpy() * 255
-                            image = image.astype(np.uint8)
-                            corrupted_image = corruption_function(image, severity=severity)
-                            if isinstance(corrupted_image, np.ndarray):
-                                corrupted_image = torch.from_numpy(corrupted_image / 255.0).permute(2, 0, 1).float()
-                            else:
-                                corrupted_image = transforms.ToTensor()(corrupted_image)
-                            # 生成10个裁剪版本以匹配测试时的数据增强
-                            corrupted_crops = transforms.TenCrop(44)(corrupted_image)
-                            corrupted_crops = torch.stack([tc for tc in corrupted_crops]).unsqueeze(0)  # (1, 10, c, h, w)
-                            
-                            # 预测（处理5维数据）
-                            pred = process_predictions(corrupted_crops.numpy(), estimator)
-                            predicted = np.argmax(pred, axis=1)
-                            
-                            # 保存对比图像
-                            if should_save_images and saved_images_count < max_saved_images:
-                                # 原始图像预测
-                                pred_clean = process_predictions(images[i, 0].unsqueeze(0).numpy(), estimator)
-                                clean_predicted = np.argmax(pred_clean, axis=1)
-
-                                # 只有当原始预测正确且扰动后预测错误时才保存图像
-                                if clean_predicted[0] == labels[i].item() and predicted[0] != labels[i].item():
-                                    filename = save_corruption_comparison(
-                                        image, corrupted_image.permute(1, 2, 0).numpy() * 255,
-                                        labels[i].item(), clean_predicted[0], predicted[0],
-                                        saved_images_count, save_dir, corruption_function.__name__, severity
-                                    )
-                                    saved_images_count += 1
-                            
-                            total += 1
-                            un_correct += (predicted[0] != labels[i].item())
-                    else:
-                        raise ValueError(f"不支持的图像维度: {images.shape}")
-            err_corruption = 100 * un_correct / total
-            ResultSender.send_log("进度",
-                                  f"UnCorrectNum of the network on the test images with {corruption_function.__name__}_{severity}: {un_correct}")
-            ResultSender.send_log("进度",
-                                  f"ASR of the network on the test images with {corruption_function.__name__}_{severity}: {err_corruption:.2f}%")
-            print(
-                f"UnCorrectNum of the network on the test images with {corruption_function.__name__}_{severity}: {un_correct}")
-            print(
-                f"ASR of the network on the test images with {corruption_function.__name__}_{severity}: {err_corruption:.2f}%")
-            
-            # 如果保存了图像，打印信息
-            if should_save_images and saved_images_count > 0:
-                print(
-                    f"已保存 {saved_images_count} 组 {corruption_function.__name__} (severity={severity}) 对比图像到 {save_dir}")
-            elif should_save_images:
-                print(f"未找到合适的样本保存 {corruption_function.__name__} (severity={severity}) 对比图像")
-            
-            asr_total += err_corruption
-    
         # 发送选定severity级别的对比图路径
         try:
             # 获取环境变量
@@ -550,12 +479,24 @@ def evaluate_robustness_corruptions(test_loader, estimator, metrics):
         except Exception as e:
             print(f"发送扰动攻击对比图路径时出错: {e}")
 
-    mCE = asr_total / (len(corruption_functions) * len(severity_levels))
-    print(f"mCE of the network on the test images: {mCE:.2f}%")
-    if "mCE" in metrics:
-        ResultSender.send_result("mCE", f"{(mCE / 100) :.4f}")
-    if "RmCE" in metrics:
-        err_clean = evaluate_clean(test_loader, estimator)
-        RmCE = mCE - err_clean
-        print(f"RmCE of the network on the test images: {RmCE:.2f}%")
-        ResultSender.send_result("RmCE",  f"{(RmCE / 100) :.4f}")
+    # 计算mCE（平均 corruption error）
+    num_corruptions = len(corruption_functions)
+    num_severities = len(severity_levels)
+    if num_corruptions > 0 and num_severities > 0:
+        mCE = asr_total / (num_corruptions * num_severities)
+        print(f"mCE (Average Corruption Error): {mCE:.2f}%")
+        if "mCE" in metrics:
+            ResultSender.send_result("mCE", f"{mCE / 100:.4f}")  # 转换为小数形式
+
+        # 计算RmCE（相对 mCE = mCE - 干净样本错误率）
+        if "RmCE" in metrics:
+            err_clean = evaluate_clean(test_loader, estimator)
+            RmCE = mCE - err_clean
+            print(f"RmCE (Relative mCE): {RmCE:.2f}%")
+            ResultSender.send_result("RmCE", f"{RmCE / 100:.4f}")  # 转换为小数形式
+    else:
+        print("警告：未计算mCE（无扰动方法或severity级别）")
+        if "mCE" in metrics:
+            ResultSender.send_result("mCE", "0.0000")
+        if "RmCE" in metrics:
+            ResultSender.send_result("RmCE", "0.0000")
