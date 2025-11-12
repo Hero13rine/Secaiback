@@ -6,7 +6,7 @@ model:
       num_classes: 3
   estimator:
     framework: "pytorch"
-    task: "object_detection"
+    task: "detection"
     parameters:
       input_shape: [3, 32, 32]
       nb_classes: 10

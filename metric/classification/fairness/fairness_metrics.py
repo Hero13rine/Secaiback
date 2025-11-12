@@ -18,17 +18,31 @@ def calculate_fairness_metrics(estimator, test_loader, sensitive_attribute_fn, f
 
         # 收集预测结果、真实标签和敏感属性
         for images, labels in test_loader:
-            images_np = images.numpy()
+            images_np = images.numpy()  # 转换为numpy数组
             labels_np = labels.numpy()
-            sensitive_attrs = sensitive_attribute_fn(images_np)
+            sensitive_attrs = sensitive_attribute_fn(images_np)  # 获取敏感属性
 
-            outputs = estimator.predict(images_np)
-            preds = np.argmax(outputs, axis=1)
+            # 根据数据维度判断处理方式（4维单图/5维10折裁剪）
+            if len(images_np.shape) == 5:  # 10折裁剪数据: (bs, ncrops, c, h, w)
+                bs, ncrops, c, h, w = images_np.shape
+                # 展平裁剪维度以便模型推理: (bs*ncrops, c, h, w)
+                images_flat = images_np.reshape(-1, c, h, w)
+                outputs = estimator.predict(images_flat)
+                # 对裁剪结果取平均: (bs*ncrops, num_classes) -> (bs, ncrops, num_classes) -> (bs, num_classes)
+                outputs_avg = outputs.reshape(bs, ncrops, -1).mean(axis=1)
+                preds = np.argmax(outputs_avg, axis=1)
+            elif len(images_np.shape) == 4:  # 单图输入: (bs, c, h, w)
+                outputs = estimator.predict(images_np)
+                preds = np.argmax(outputs, axis=1)
+            else:
+                raise ValueError(f"不支持的数据维度：{images_np.shape}，仅支持4维或5维张量")
 
+            # 收集结果（确保所有列表长度匹配）
             all_preds.extend(preds)
             all_labels.extend(labels_np)
             all_sensitive_attrs.extend(sensitive_attrs)
 
+        # 转换为numpy数组以便后续分析
         all_preds = np.array(all_preds)
         all_labels = np.array(all_labels)
         all_sensitive_attrs = np.array(all_sensitive_attrs)

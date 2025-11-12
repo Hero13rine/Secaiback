@@ -5,8 +5,6 @@ import numpy as np
 import torch
 from torch import optim
 
-from data.load_dataset import load_cifar_train_test
-from metric.classification.basic.basic import cal_basic
 from metric.classification.generalization.generalization import evaluate_generalization
 from metric.classification.interpretability.shap.GradientShap import GradientShap
 from metric.classification.safety.membershipinference.evaluate_mia import evaluate_mia
@@ -43,6 +41,7 @@ def main():
     model_instantiation_config = user_config["model"]["instantiation"]
     model_estimator_config = user_config["model"]["estimator"]
     evaluation_config = user_config["evaluation"]
+    task = model_estimator_config.get("task", "classification")
     ResultSender.send_log("进度", "配置文件已加载完毕")
 
     # 2.初始化模型
@@ -51,8 +50,13 @@ def main():
     ResultSender.send_log("进度", "模型初始化完成")
 
     # 3.获取优化器和损失函数
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
-    loss = torch.nn.CrossEntropyLoss()
+    if task == "detection":
+        params = [p for p in model.parameters() if p.requires_grad]
+        optimizer = torch.optim.SGD(params, lr=5e-3, momentum=0.9, weight_decay=5e-4)
+        loss = None
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=0.01)
+        loss = torch.nn.CrossEntropyLoss()
 
     # 4.生成估计器
     estimator = EstimatorFactory.create(
@@ -68,15 +72,16 @@ def main():
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
+    if task == "detection":
+        from metric.object_detection.basic.basic import cal_basic
+    else:
+        from metric.classification.basic.basic import cal_basic
     if evaluation_type == "basic":
         cal_basic(estimator, test_loader, evaluation_config["basic"])
     elif evaluation_type == "robustness":
         evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
     elif evaluation_type == "interpretability":
         GradientShap(model, test_loader)
-    elif evaluation_type == "safety":
-        train_loader, test_loader = load_cifar_train_test()
-        evaluate_mia(train_loader, test_loader, estimator, evaluation_config["safety"]["membership_inference"])
     elif evaluation_type == "generalization":
         evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
     

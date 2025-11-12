@@ -12,30 +12,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 import cv2
 from PIL import Image
-
-# 尝试导入 YOLOv7 的数据集工具
-try:
-    # YOLOv7 的 datasets 模块需要从 YOLOv7 代码路径导入
-    import importlib.util
-    
-    # 尝试从默认路径加载
-    yolov7_root = "/wkm/secai-common/yolo/yolov7"
-    if os.path.exists(yolov7_root):
-        if yolov7_root not in sys.path:
-            sys.path.insert(0, yolov7_root)
-        
-        # 加载 YOLOv7 的 datasets 模块
-        try:
-            from utils.datasets import LoadImagesAndLabels, letterbox
-            YOLOV7_DATASETS_AVAILABLE = True
-        except ImportError:
-            YOLOV7_DATASETS_AVAILABLE = False
-            print("警告: YOLOv7 datasets 模块不可用，将使用简化版本")
-    else:
-        YOLOV7_DATASETS_AVAILABLE = False
-except Exception:
-    YOLOV7_DATASETS_AVAILABLE = False
-
+from utils.yolo.yolo_utils.datasets import LoadImagesAndLabels, letterbox
+YOLOV7_DATASETS_AVAILABLE = True
 
 class DIORDataset(Dataset):
     """
@@ -105,7 +83,7 @@ class DIORDataset(Dataset):
             val_path = os.path.join(os.path.dirname(data_yaml_path), val_path)
         if not os.path.isabs(test_path):
             test_path = os.path.join(os.path.dirname(data_yaml_path), test_path)
-        
+            
         self.train_path = train_path
         self.val_path = val_path
         self.test_path = test_path
@@ -127,33 +105,6 @@ class DIORDataset(Dataset):
                 image_weights=image_weights,
                 prefix=prefix
             )
-        else:
-            # 使用简化版本
-            self.dataset = self._load_simple_dataset(train_path)
-    
-    def _load_simple_dataset(self, path: str):
-        """加载简化版本的数据集"""
-        # 读取图像和标签文件
-        image_files = []
-        label_files = []
-        
-        if os.path.isdir(path):
-            # 查找所有图像文件
-            for ext in ['.jpg', '.jpeg', '.png', '.bmp']:
-                image_files.extend(Path(path).glob(f'*{ext}'))
-                image_files.extend(Path(path).glob(f'*{ext.upper()}'))
-            
-            # 查找对应的标签文件（在 labels 目录中）
-            labels_dir = Path(path).parent / 'labels'
-            if labels_dir.exists():
-                for img_file in image_files:
-                    label_file = labels_dir / f"{img_file.stem}.txt"
-                    if label_file.exists():
-                        label_files.append(label_file)
-                    else:
-                        label_files.append(None)
-        
-        return list(zip(image_files, label_files))
     
     def __len__(self):
         if YOLOV7_DATASETS_AVAILABLE:
@@ -205,7 +156,7 @@ class DIORDataset(Dataset):
 
 
 def load_dior(
-    data_yaml_path: str = "/wkm/secai-common/yolo/yolov7/data/dior.yaml",
+    data_yaml_path: str = "/wkm/data/dior/dior.yaml",
     img_size: int = 640,
     batch_size: int = 16,
     split: str = "val",
@@ -239,7 +190,7 @@ def load_dior(
     # 自动检测 YOLOv7 代码路径
     if yolov7_root is None:
         possible_paths = [
-            "/wkm/secai-common/yolo/yolov7",
+            "/wkm/yolo/yolov7",
             os.path.join(os.path.dirname(data_yaml_path), "..", ".."),
         ]
         for path in possible_paths:
@@ -436,7 +387,7 @@ def load_dior(
 
 
 def load_dior_train_val(
-    data_yaml_path: str = "/wkm/secai-common/yolo/yolov7/data/dior.yaml",
+    data_yaml_path: str = "/wkm/data/dior/dior.yaml",
     img_size: int = 640,
     batch_size: int = 16,
     augment: bool = True,

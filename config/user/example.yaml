@@ -1,0 +1,94 @@
+# -*- coding: utf-8 -*-
+# SecAI 统一配置模板，用于分类和目标检测评估
+#
+# 使用说明：
+# 1. 配置模型信息(model)：
+#    - 指定模型定义文件路径(model_path)
+#    - 指定模型权重文件路径(weight_path)
+#    - 设置模型类名(model_name)
+#    - 根据需要调整模型参数(parameters)
+# 2. 配置估计器的相关信息（estimator)：
+#    - 配置模型框架(framework)
+#    - 配置评测任务信息(task)
+#    - 配置估计器所需参数，具体参数需要根据模型框架和任务类型进行配置
+# 3. 配置评估指标(evaluation)：
+#    - 根据需要启用不同的评估维度(basic, robustness, interpretability等)
+#    - 在每个评估维度下指定要计算的具体指标
+#    - 可根据需要调整评估参数
+# 3.1评估指标配置格式要求：
+#    评估指标按层级结构组织，层级依次是：维度：方法：指标
+#   - 维度(Dimension)：如 basic, robustness, interpretability, safety, generalization, fairness
+#   - 方法(Method)：在维度下的具体评估方法，如 robustness 维度下的 adversarial, corruption
+#   - 指标(Metric)：具体的评估指标，如 accuracy, precision, advacc 等
+#
+# 注意：默认配置适用于CIFAR-10分类任务，请根据实际情况修改路径和参数
+
+model:
+  instantiation:
+    model_path: "model/net/ResNet.py"           # 定义模型类的 Python 模块路径
+    weight_path: "model/weight/resnet18_cifar10.pt"  # 待加载的检查点文件
+    model_name: "ResNet18"                      # `model_path` 中的类名
+    parameters:                                  # 传递给模型构造函数的额外参数
+      # 示例（分类）：
+      #   num_classes: 10
+      # 示例（检测）：
+      #   num_classes: 20
+      #   network: "fasterrcnn"
+  estimator:
+    framework: "pytorch"                        # 与 `config/estimator/pytorch/*` 配置文件匹配
+    task: "classification"                      # 对于检测模型，更改为 "object_detection"
+    parameters:
+      input_shape: [3, 32, 32]                   # 两个任务都需要；如果输入尺寸固定，请使用实际的空间尺寸
+      nb_classes: 10                             # 分类任务必需；检测任务可移除
+      clip_values: [0, 1]                        # ART 估计器期望的最小/最大归一化边界
+      device: "cuda"                             # 当 GPU 不可用时切换为 "cpu"
+      device_type: "gpu"                        # 使用 "auto" 让运行时自动检测硬件
+      channels_first: true                       # 对于 torch 张量保持 true；如果数据是 NHWC 格式则覆盖
+      # 可选（仅检测）：
+      # score_threshold: 0.0                     # 在包装器内部过滤低置信度框
+      # preprocessing: [0.0, 1.0]                # 与检测估计器配置中的可选键匹配
+      # use_amp: false                           # 如需要，为分类启用混合精度
+
+# 评估选项遵循 `eva_start.py` 中的 pods 编排布局
+# 只提供你打算运行的部分；其他部分可以保持为空列表或字典
+evaluation:
+  basic:
+    performance_testing:               # 基础性能测试
+      metrics:                         # 性能测试指标列表
+        -               
+      performance_testing_config:      # 性能测试配置参数
+        -
+  robustness:
+    adversarial:                       # 对抗鲁棒性测试
+      metrics:                         # 对抗攻击评估指标列表
+        -
+      attacks:                         # 对抗攻击配置  可选(下方参数，使用什么攻击就用填写对应的攻击名称）
+        fgsm:                          # FGSM攻击方法配置
+          parameters:                  # FGSM攻击参数
+        pgd:                           # PGD攻击方法配置
+          parameters:                  # PGD攻击参数
+              eps: 0.03                # 扰动强度参数
+    corruption:                        # 数据损坏鲁棒性测试
+      metrics:                         # 数据损坏评估指标列表
+        -
+      corruption_config:               # 数据损坏测试配置
+        -
+  interpretability:
+    interpretability_testing:          # 可解释性测试
+      metrics:                         # 可解释性评估指标列表
+        -
+  safety:
+    membership_inference:              # 安全性测试 - 成员推理攻击
+      metrics:                         # 成员推理攻击评估指标列表
+        -
+  generalization:
+    generalization_testing:            # 泛化能力测试
+      metrics:                         # 泛化能力评估指标列表
+        -
+  fairness:
+    group_fairness:                    # 群体公平性测试
+      metrics:                         # 群体公平性评估指标列表
+        -
+    individual_fairness:               # 个体公平性测试
+      metrics:                         # 个体公平性评估指标列表
+        -
