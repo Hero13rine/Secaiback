@@ -5,7 +5,6 @@ import numpy as np
 import torch
 from torch import optim
 
-from data.load_dataset import load_cifar_train_test
 from metric.classification.generalization.generalization import evaluate_generalization
 from metric.classification.interpretability.shap.GradientShap import GradientShap
 from metric.classification.safety.membershipinference.evaluate_mia import evaluate_mia
@@ -83,9 +82,6 @@ def main():
         evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
     elif evaluation_type == "interpretability":
         GradientShap(model, test_loader)
-    elif evaluation_type == "safety":
-        train_loader, test_loader = load_cifar_train_test()
-        evaluate_mia(train_loader, test_loader, estimator, evaluation_config["safety"]["membership_inference"])
     elif evaluation_type == "generalization":
         evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
     
