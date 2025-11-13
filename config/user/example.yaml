@@ -55,7 +55,10 @@ evaluation:
   basic:
     performance_testing:               # 基础性能测试
       metrics:                         # 性能测试指标列表
-        -               
+        - accuracyD
+        - precision
+        - recall
+        - f1score
       performance_testing_config:      # 性能测试配置参数
         -
   robustness:

@@ -5,7 +5,7 @@ from .adversarial import (
     AttackEvaluationResult,
     RotationRobustnessMetrics,
 )
-from .eval_robustness import evaluate_adversarial_robustness, load_robustness_config
+from .evaluate_robustness import evaluate_adversarial_robustness, load_robustness_config
 
 __all__ = [
     "AdversarialRobustnessEvaluator",
