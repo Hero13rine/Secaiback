@@ -200,7 +200,7 @@ class _ClassEvaluationStats:
     npos: int
 
 
-def cal_object_detection(estimator, test_loader, metrics: Dict[str, Union[List[str], Dict]]):
+def cal_basic(estimator, test_loader, metrics: Dict[str, Union[List[str], Dict]]):
     """
     目标检测任务的评估入口点.
 
