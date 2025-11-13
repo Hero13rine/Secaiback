@@ -57,22 +57,20 @@ def save_comparison_images(clean_img, adv_img, true_label, clean_pred, adv_pred,
     """保存原始图像和对抗样本的对比图"""
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
 
-    # 显示原始图像
+    # 显示原始图像（确保是HWC格式且值在0-1之间）
     if clean_img.shape[0] == 3:  # CHW格式
-        clean_img_vis = denormalize(clean_img)
+        clean_img_vis = np.clip(denormalize(clean_img), 0, 1)
     else:  # HWC格式
-        clean_img_vis = clean_img
-    clean_img_vis = np.clip(clean_img_vis, 0, 1)
+        clean_img_vis = np.clip(clean_img / 255.0 if clean_img.max() > 1.0 else clean_img, 0, 1)
     axes[0].imshow(clean_img_vis)
     axes[0].set_title(f"Clean Image\nTrue: {true_label}, Pred: {clean_pred}")
     axes[0].axis('off')
 
-    # 显示对抗样本
+    # 显示对抗样本（确保是HWC格式且值在0-1之间）
     if adv_img.shape[0] == 3:  # CHW格式
-        adv_img_vis = denormalize(adv_img)
+        adv_img_vis = np.clip(denormalize(adv_img), 0, 1)
     else:  # HWC格式
-        adv_img_vis = adv_img
-    adv_img_vis = np.clip(adv_img_vis, 0, 1)
+        adv_img_vis = np.clip(adv_img / 255.0 if adv_img.max() > 1.0 else adv_img, 0, 1)
     axes[1].imshow(adv_img_vis)
     axes[1].set_title(f"Adversarial Image\nTrue: {true_label}, Pred: {adv_pred}")
     axes[1].axis('off')
