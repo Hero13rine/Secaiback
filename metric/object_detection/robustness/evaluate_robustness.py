@@ -11,6 +11,8 @@ import yaml
 
 from attack import AttackFactory
 
+DEFAULT_CORRUPTION_PARAMETER_CONFIG = Path("config/attack/corruption.yaml")
+
 from .adversarial import (
     AdversarialRobustnessEvaluator,
     AttackEvaluationResult,
@@ -335,27 +337,56 @@ def _parse_corruption_configs(config: Mapping[str, Any]) -> List[CorruptionConfi
         return []
 
     default_metrics = _extract_corruption_metric_list(
-        corruption_section.get("default_metrics") or corruption_section.get("metrics")
+        corruption_section.get("mertics")
+        or corruption_section.get("metrics")
+        or corruption_section.get("default_metrics")
     )
-    default_severities = _extract_severity_list(corruption_section.get("default_severities"))
+
+    parameter_config_path = (
+        corruption_section.get("parameter_config")
+        or corruption_section.get("parameters_config")
+    )
+    parameter_overrides = _load_corruption_parameter_overrides(parameter_config_path)
 
     corruptions_payload = corruption_section.get("corruptions") or corruption_section.get("methods")
     if corruptions_payload is None:
+        reserved_keys = {
+            "mertics",
+            "metrics",
+            "default_metrics",
+            "default_severities",
+            "parameter_config",
+            "parameters_config",
+            "corruptions",
+            "methods",
+        }
+        inferred_payload: Dict[str, Any] = {}
+        for key, value in corruption_section.items():
+            if key in reserved_keys:
+                continue
+            inferred_payload[key] = value
+        if inferred_payload:
+            corruptions_payload = inferred_payload
+    if corruptions_payload is None:
         if default_metrics is not None:
-            return [
-                CorruptionConfig(
-                    name="gaussian_noise",
-                    method="gaussian_noise",
-                    metrics=default_metrics,
-                    severities=default_severities,
-                )
-            ]
+            fallback = _build_corruption_config(
+                "gaussian_noise",
+                True,
+                default_metrics,
+                parameter_overrides,
+            )
+            return [fallback] if fallback else []
         return []
 
     parsed: List[CorruptionConfig] = []
     if isinstance(corruptions_payload, Mapping):
         for name, payload in corruptions_payload.items():
-            corruption = _build_corruption_config(name, payload, default_metrics, default_severities)
+            corruption = _build_corruption_config(
+                name,
+                payload,
+                default_metrics,
+                parameter_overrides,
+            )
             if corruption:
                 parsed.append(corruption)
     elif isinstance(corruptions_payload, Sequence) and not isinstance(
@@ -363,19 +394,24 @@ def _parse_corruption_configs(config: Mapping[str, Any]) -> List[CorruptionConfi
     ):
         for payload in corruptions_payload:
             if isinstance(payload, str):
-                parsed.append(
-                    CorruptionConfig(
-                        name=payload,
-                        method=payload,
-                        metrics=default_metrics,
-                        severities=default_severities,
-                    )
+                corruption = _build_corruption_config(
+                    payload,
+                    True,
+                    default_metrics,
+                    parameter_overrides,
                 )
+                if corruption:
+                    parsed.append(corruption)
             elif isinstance(payload, Mapping):
                 name = payload.get("name") or payload.get("method")
                 if not name:
                     continue
-                corruption = _build_corruption_config(name, payload, default_metrics, default_severities)
+                corruption = _build_corruption_config(
+                    name,
+                    payload,
+                    default_metrics,
+                    parameter_overrides,
+                )
                 if corruption:
                     parsed.append(corruption)
     else:
@@ -384,19 +420,74 @@ def _parse_corruption_configs(config: Mapping[str, Any]) -> List[CorruptionConfi
     return parsed
 
 
+def _load_corruption_parameter_overrides(
+    config_path: Optional[Union[str, Path]]
+) -> Mapping[str, Any]:
+    """加载可调节的扰动参数覆盖."""
+
+    candidate_paths: List[Path] = []
+    if config_path:
+        try:
+            candidate_paths.append(Path(config_path))
+        except TypeError:
+            pass
+    candidate_paths.append(DEFAULT_CORRUPTION_PARAMETER_CONFIG)
+
+    overrides: Mapping[str, Any] = {}
+    seen: set = set()
+    for candidate in candidate_paths:
+        if not candidate:
+            continue
+        normalized = candidate.expanduser()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        try:
+            with open(normalized, "r", encoding="utf-8") as handle:
+                payload = yaml.safe_load(handle) or {}
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            print(f"警告: 无法读取扰动参数文件 {normalized}: {exc}")
+            continue
+
+        if isinstance(payload, Mapping):
+            corruptions_payload = payload.get("corruptions")
+            if isinstance(corruptions_payload, Mapping):
+                overrides = corruptions_payload
+            else:
+                overrides = payload
+            break
+
+    return overrides
+
+
 def _build_corruption_config(
     name: str,
     payload: Any,
     default_metrics: Optional[Tuple[str, ...]],
-    default_severities: Tuple[int, ...],
+    parameter_overrides: Mapping[str, Any],
 ) -> Optional[CorruptionConfig]:
     """构建扰动配置对象."""
 
     method_name = name
     metrics = default_metrics
-    severities = default_severities
-    parameters: Mapping[str, Any] = {}
     enabled = True
+
+    override_payload = (
+        parameter_overrides.get(name)
+        if isinstance(parameter_overrides, Mapping)
+        else None
+    )
+    if isinstance(override_payload, Mapping):
+        override_parameters = dict(override_payload.get("parameters", {}))
+    else:
+        override_parameters = {}
+
+    severities = _extract_severity_list(
+        override_payload.get("severities") if isinstance(override_payload, Mapping) else None
+    )
+    parameters: Dict[str, Any] = dict(override_parameters)
 
     if isinstance(payload, bool):
         enabled = payload
@@ -405,15 +496,17 @@ def _build_corruption_config(
     elif isinstance(payload, str):
         method_name = payload.strip() or name
     elif isinstance(payload, Sequence) and not isinstance(payload, (str, bytes)):
-        severities = _extract_severity_list(payload, default_severities)
+        severities = _extract_severity_list(payload, severities)
     elif isinstance(payload, Mapping):
         enabled = bool(payload.get("enabled", True))
         metrics = _extract_corruption_metric_list(
             payload.get("metrics") or payload.get("outputs"), default_metrics
         )
-        severities = _extract_severity_list(payload.get("severities"), default_severities)
+        severities = _extract_severity_list(payload.get("severities"), severities)
         method_name = payload.get("method") or name
-        parameters = dict(payload.get("parameters", {}))
+        parameters_payload = payload.get("parameters")
+        if isinstance(parameters_payload, Mapping):
+            parameters.update(parameters_payload)
     else:
         return None
 
