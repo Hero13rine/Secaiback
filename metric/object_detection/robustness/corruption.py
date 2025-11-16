@@ -9,6 +9,7 @@ import torch
 import torchvision.transforms.functional as TF
 
 from metric.object_detection.basic.detection import DetectionSample, ObjectDetectionEvaluator
+from metric.object_detection.robustness.matching import compute_detection_errors
 
 PredictionLike = Mapping[str, Sequence[float]]
 GroundTruthLike = Mapping[str, Sequence[float]]
@@ -66,7 +67,11 @@ class CorruptionRobustnessEvaluator:
         baseline_map = self._compute_map(base_samples, gt_samples)
         corrupted_map = self._compute_map(corr_samples, gt_samples)
 
-        misses, _, gt_total, _ = self._compute_detection_errors(corr_samples, gt_samples)
+        misses, _, gt_total, _ = compute_detection_errors(
+            corr_samples,
+            gt_samples,
+            self.iou_threshold,
+        )
         miss_rate = misses / gt_total if gt_total > 0 else 0.0
         magnitude = self._compute_perturbation_magnitude(original_images, corrupted_images)
 
@@ -92,27 +97,6 @@ class CorruptionRobustnessEvaluator:
         evaluation = self._detector.evaluate(list(predictions), list(ground_truths))
         details = evaluation.get(self.iou_threshold, {})
         return float(details.get("map", 0.0))
-
-    def _compute_detection_errors(
-        self,
-        predictions: Sequence[DetectionSample],
-        ground_truths: Sequence[DetectionSample],
-    ) -> Tuple[int, int, int, int]:
-        misses = 0
-        false_positives = 0
-        total_gt = 0
-        total_predictions = 0
-
-        for pred, gt in zip(predictions, ground_truths):
-            gt_boxes = gt.boxes
-            pred_boxes = pred.boxes
-            total_gt += gt_boxes.shape[0]
-            total_predictions += pred_boxes.shape[0]
-            matches = _greedy_iou_match(pred_boxes, gt_boxes, self.iou_threshold)
-            misses += gt_boxes.shape[0] - len(matches)
-            false_positives += pred_boxes.shape[0] - len(matches)
-
-        return misses, false_positives, total_gt, total_predictions
 
     def _compute_perturbation_magnitude(
         self,
@@ -307,74 +291,6 @@ def apply_image_corruption(
         raise ValueError(f"未知的扰动方法 '{method}'，可选项: {available}")
     params = dict(parameters or {})
     return fn(image, severity=severity, **params)
-
-
-# 采用与对抗评估中一致的贪婪匹配逻辑
-
-def _greedy_iou_match(
-    pred_boxes: np.ndarray, gt_boxes: np.ndarray, threshold: float
-) -> List[Tuple[int, int]]:
-    return _greedy_iou_match_generic(pred_boxes, gt_boxes, threshold, _pairwise_iou_axis_aligned)
-
-
-def _greedy_iou_match_generic(
-    pred_boxes: np.ndarray,
-    gt_boxes: np.ndarray,
-    threshold: float,
-    pairwise_iou_fn: Callable[[np.ndarray, np.ndarray], np.ndarray],
-) -> List[Tuple[int, int]]:
-    if pred_boxes.size == 0 or gt_boxes.size == 0:
-        return []
-
-    iou_matrix = pairwise_iou_fn(pred_boxes, gt_boxes)
-    if iou_matrix.size == 0:
-        return []
-
-    matches: List[Tuple[int, int]] = []
-
-    while True:
-        flat_index = int(np.argmax(iou_matrix))
-        best_iou = float(iou_matrix.flat[flat_index])
-        if not np.isfinite(best_iou) or best_iou < threshold or best_iou <= 0.0:
-            break
-        pred_idx, gt_idx = divmod(flat_index, iou_matrix.shape[1])
-        matches.append((pred_idx, gt_idx))
-        iou_matrix[pred_idx, :] = -1.0
-        iou_matrix[:, gt_idx] = -1.0
-
-    return matches
-
-
-def _pairwise_iou_axis_aligned(pred_boxes: np.ndarray, gt_boxes: np.ndarray) -> np.ndarray:
-    if pred_boxes.size == 0 or gt_boxes.size == 0:
-        return np.zeros((pred_boxes.shape[0], gt_boxes.shape[0]), dtype=np.float32)
-
-    pred = np.asarray(pred_boxes, dtype=np.float32).reshape(-1, 4)
-    gt = np.asarray(gt_boxes, dtype=np.float32).reshape(-1, 4)
-
-    pred_exp = pred[:, None, :]
-    gt_exp = gt[None, :, :]
-
-    ix1 = np.maximum(pred_exp[..., 0], gt_exp[..., 0])
-    iy1 = np.maximum(pred_exp[..., 1], gt_exp[..., 1])
-    ix2 = np.minimum(pred_exp[..., 2], gt_exp[..., 2])
-    iy2 = np.minimum(pred_exp[..., 3], gt_exp[..., 3])
-
-    inter_w = np.maximum(ix2 - ix1, 0.0)
-    inter_h = np.maximum(iy2 - iy1, 0.0)
-    intersection = inter_w * inter_h
-
-    pred_area = np.maximum(pred_exp[..., 2] - pred_exp[..., 0], 0.0) * np.maximum(
-        pred_exp[..., 3] - pred_exp[..., 1], 0.0
-    )
-    gt_area = np.maximum(gt_exp[..., 2] - gt_exp[..., 0], 0.0) * np.maximum(
-        gt_exp[..., 3] - gt_exp[..., 1], 0.0
-    )
-    union = pred_area + gt_area - intersection
-    union = np.maximum(union, np.finfo(np.float32).eps)
-
-    return (intersection / union).astype(np.float32)
-
 
 __all__ = [
     "CorruptionEvaluationResult",
