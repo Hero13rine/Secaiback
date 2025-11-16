@@ -91,7 +91,7 @@ def main(
         optimizer=optimizer,
         config=model_estimator_config,
     )
-
+    # TODO 规范输入的yaml格式，包括每个攻击都要有方法这点，还有很乱的扰动攻击格式
     # 5.加载数据
     print("进度: 加载测试数据...")
     test_loader = load_data("fasterrcnn_test/test")

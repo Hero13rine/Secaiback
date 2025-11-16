@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
-
-import numpy as np
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from metric.object_detection.basic.detection import DetectionSample, ObjectDetectionEvaluator
+from metric.object_detection.robustness.robustUtils import compute_detection_errors
 
 
 # 类型定义
@@ -88,9 +87,10 @@ class AdversarialRobustnessEvaluator:
         adv_map = self._compute_map(adv_samples, gt_samples)
 
         print(f"  进度: 计算检测错误...")
-        misses, false_positives, gt_count, pred_count = self._compute_detection_errors(
+        misses, false_positives, gt_count, pred_count = compute_detection_errors(
             adv_samples,
             gt_samples,
+            self.iou_threshold,
         )
 
         metrics = self._compose_metrics(
@@ -157,29 +157,6 @@ class AdversarialRobustnessEvaluator:
         details = evaluation.get(self.iou_threshold, {})
         return float(details.get("map", 0.0))
 
-    def _compute_detection_errors(
-        self,
-        predictions: Sequence[DetectionSample],
-        ground_truths: Sequence[DetectionSample],
-    ) -> Tuple[int, int, int, int]:
-        """使用贪婪IoU匹配计算漏检和误检."""
-
-        misses = 0
-        false_positives = 0
-        total_gt = 0
-        total_predictions = 0
-
-        for pred, gt in zip(predictions, ground_truths):
-            gt_boxes = gt.boxes
-            pred_boxes = pred.boxes
-            total_gt += gt_boxes.shape[0]
-            total_predictions += pred_boxes.shape[0]
-            matches = _greedy_iou_match(pred_boxes, gt_boxes, self.iou_threshold)
-            misses += gt_boxes.shape[0] - len(matches)
-            false_positives += pred_boxes.shape[0] - len(matches)
-
-        return misses, false_positives, total_gt, total_predictions
-
     def _to_samples(
         self,
         entries: Sequence[PredictionLike],
@@ -225,79 +202,6 @@ class AdversarialRobustnessEvaluator:
             return 0.0
         drop = (baseline_map - adversarial_map) / baseline_map
         return float(max(0.0, drop))
-
-
-def _greedy_iou_match(
-    pred_boxes: np.ndarray, gt_boxes: np.ndarray, threshold: float
-) -> List[Tuple[int, int]]:
-    """Greedy IoU matching for axis-aligned boxes."""
-
-    return _greedy_iou_match_generic(
-        pred_boxes, gt_boxes, threshold, _pairwise_iou_axis_aligned
-    )
-
-
-def _greedy_iou_match_generic(
-    pred_boxes: np.ndarray,
-    gt_boxes: np.ndarray,
-    threshold: float,
-    pairwise_iou_fn: Callable[[np.ndarray, np.ndarray], np.ndarray],
-) -> List[Tuple[int, int]]:
-    if pred_boxes.size == 0 or gt_boxes.size == 0:
-        return []
-
-    iou_matrix = pairwise_iou_fn(pred_boxes, gt_boxes)
-    if iou_matrix.size == 0:
-        return []
-
-    matches: List[Tuple[int, int]] = []
-
-    while True:
-        flat_index = int(np.argmax(iou_matrix))
-        best_iou = float(iou_matrix.flat[flat_index])
-        if not np.isfinite(best_iou) or best_iou < threshold or best_iou <= 0.0:
-            break
-        pred_idx, gt_idx = divmod(flat_index, iou_matrix.shape[1])
-        matches.append((pred_idx, gt_idx))
-        iou_matrix[pred_idx, :] = -1.0
-        iou_matrix[:, gt_idx] = -1.0
-
-    return matches
-
-
-def _pairwise_iou_axis_aligned(pred_boxes: np.ndarray, gt_boxes: np.ndarray) -> np.ndarray:
-    """Vectorised pairwise IoU for axis-aligned bounding boxes."""
-
-    if pred_boxes.size == 0 or gt_boxes.size == 0:
-        return np.zeros((pred_boxes.shape[0], gt_boxes.shape[0]), dtype=np.float32)
-
-    pred = np.asarray(pred_boxes, dtype=np.float32).reshape(-1, 4)
-    gt = np.asarray(gt_boxes, dtype=np.float32).reshape(-1, 4)
-
-    pred_exp = pred[:, None, :]
-    gt_exp = gt[None, :, :]
-
-    ix1 = np.maximum(pred_exp[..., 0], gt_exp[..., 0])
-    iy1 = np.maximum(pred_exp[..., 1], gt_exp[..., 1])
-    ix2 = np.minimum(pred_exp[..., 2], gt_exp[..., 2])
-    iy2 = np.minimum(pred_exp[..., 3], gt_exp[..., 3])
-
-    inter_w = np.maximum(ix2 - ix1, 0.0)
-    inter_h = np.maximum(iy2 - iy1, 0.0)
-    intersection = inter_w * inter_h
-
-    pred_area = np.maximum(pred_exp[..., 2] - pred_exp[..., 0], 0.0) * np.maximum(
-        pred_exp[..., 3] - pred_exp[..., 1], 0.0
-    )
-    gt_area = np.maximum(gt_exp[..., 2] - gt_exp[..., 0], 0.0) * np.maximum(
-        gt_exp[..., 3] - gt_exp[..., 1], 0.0
-    )
-    union = pred_area + gt_area - intersection
-    union = np.maximum(union, np.finfo(np.float32).eps)
-
-    return (intersection / union).astype(np.float32)
-
-
 __all__ = [
     "AttackEvaluationResult",
     "AdversarialRobustnessEvaluator",
