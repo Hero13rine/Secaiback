@@ -23,41 +23,21 @@ evaluation:
   # basic: ["map", "accuracy", "precision"]
   robustness:
     corruption:
-      default_metrics:
+      # Global metrics shared by every corruption evaluation (typo intentional).
+      mertics:
         - perturbation_magnitude
         - performance_drop_rate
         - perturbation_tolerance
-      default_severities: [1, 3, 5]
-      corruptions:
-        gaussian_noise:
-          method: "gaussian_noise"
-          metrics:
-            - performance_drop_rate
-            - perturbation_tolerance
-          severities: [1, 2, 3]
-          parameters:
-            magnitude: 0.05
-        gaussian_blur:
-          method: "gaussian_blur"
-          severities: [1, 3, 5]
-          parameters:
-            kernel_multiplier: 2
-        brightness_shift:
-          method: "brightness_shift"
-          metrics:
-            - perturbation_magnitude
-            - performance_drop_rate
-          severities: [2, 4]
-          parameters:
-            max_shift: 0.25
-        contrast_shift:
-          method: "contrast_shift"
-          metrics:
-            - perturbation_magnitude
-            - perturbation_tolerance
-          severities: [1, 3, 5]
-          parameters:
-            max_shift: 0.4
+      # Optional path that points to adjustable corruption parameters.
+      parameter_config: "config/attack/corruption.yaml"
+      gaussian_noise:
+        enabled: true
+      gaussian_blur:
+        enabled: true
+      brightness_shift:
+        enabled: true
+      contrast_shift:
+        enabled: true
   interpretability: []
   safety: []
   generalization: []
