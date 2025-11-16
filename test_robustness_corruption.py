@@ -1,103 +1,126 @@
-+100
--0
+"""Entry script showcasing corruption robustness evaluation for detection models."""
+from __future__ import annotations
 
-"""Smoke test for the corruption-robustness evaluation pipeline.
-
-The script mirrors ``test_fasterrcnn.py`` by wiring together a lightweight model,
-a dummy dataset and the :func:`evaluate_corruption_robustness` entrypoint.
-It is intentionally simple and focuses on validating that the evaluation flow
-can be executed without relying on the larger benchmarking harness.
-"""
-
-
-import pprint
-from typing import Iterable, Sequence, Tuple
+from typing import Any, Mapping, Sequence
 
 import torch
-from torch.utils.data import DataLoader
 
-from data.dummy_detection_dataset import DummyDetectionDataset
-from metric.object_detection.robustness.evaluate_robustness import (
+from estimator import EstimatorFactory
+from metric.object_detection.robustness import (
+    CorruptionEvaluationResult,
     evaluate_corruption_robustness,
 )
-from model.net.dummy_detector import DummyObjectDetectionModel
+from method import load_config
+from model import load_model
+from fasterrcnn_test.load_dataset import load_data
 
 
-class DummyEstimator:
-    """Minimal estimator wrapper that exposes the ``predict`` API."""
-
-    def __init__(self, model: torch.nn.Module) -> None:
-        self.model = model.eval()
-
-    def predict(self, inputs: torch.Tensor | Sequence[torch.Tensor]):
-        """Adapt stacked tensors to the dummy detector input contract."""
-
-        if isinstance(inputs, torch.Tensor):
-            batch = [inputs[i] for i in range(inputs.shape[0])]
-        else:
-            batch = list(inputs)
-
-        with torch.no_grad():
-            return self.model(batch)
-
-
-def _collate_detection_batch(batch: Iterable[Tuple[torch.Tensor, dict]]):
+def _collate_detection(batch: Sequence):
     images, targets = zip(*batch)
     return list(images), list(targets)
 
 
-def main() -> None:
-    torch.manual_seed(42)
+def _prepare_robustness_payload(config: Mapping[str, Any]) -> Mapping[str, Any]:
+    evaluation_config = config.get("evaluation") if isinstance(config, Mapping) else None
+    if isinstance(evaluation_config, Mapping) and "robustness" in evaluation_config:
+        return evaluation_config
 
-    dataset = DummyDetectionDataset(num_samples=6)
-    loader = DataLoader(dataset, batch_size=2, collate_fn=_collate_detection_batch)
+    if "robustness" in config:
+        return config
 
-    model = DummyObjectDetectionModel(num_classes=3)
-    estimator = DummyEstimator(model)
-
-    corruption_config = {
-        "evaluation": {
-            "robustness": {
-                "corruption": {
-                    "default_metrics": [
-                        "perturbation_magnitude",
-                        "performance_drop_rate",
-                        "perturbation_tolerance",
-                    ],
-                    "default_severities": [1, 2],
-                    "corruptions": {
-                        "gaussian_noise": {
-                            "method": "gaussian_noise",
-                            "severities": [1, 3],
-                            "parameters": {"magnitude": 0.05},
-                        },
-                        "brightness_shift": {
-                            "method": "brightness_shift",
-                            "severities": [2],
-                            "metrics": ["performance_drop_rate"],
-                        },
-                    },
-                }
+    return {
+        "robustness": {
+            "corruption": {
+                "metrics": [
+                    "perturbation_magnitude",
+                    "performance_drop_rate",
+                    "perturbation_tolerance",
+                ],
+                "corruptions": {
+                    "gaussian_noise": {
+                        "method": "gaussian_noise",
+                        "severities": [1, 3, 5],
+                        "parameters": {"magnitude": 0.05},
+                    }
+                },
             }
         }
     }
 
-    print("进度: 启动自然扰动鲁棒性流程测试...")
-    results = evaluate_corruption_robustness(
-        estimator=estimator,
-        test_data=loader,
-        config=corruption_config,
-        iou_threshold=0.5,
-        batch_size=2,
+
+def _print_results(results: Mapping[str, CorruptionEvaluationResult]) -> None:
+    if not results:
+        print("No perturbation corruptions were enabled in the robustness configuration.")
+        return
+    for corruption_name, result in results.items():
+        print(f"\n=== {corruption_name} ===")
+        metrics = result.metrics
+        print(
+            "Overall - perturbation magnitude: {0:.4f}, performance drop rate: {1:.4f}, perturbation tolerance: {2:.4f}".format(
+                metrics.perturbation_magnitude,
+                metrics.performance_drop_rate,
+                metrics.perturbation_tolerance,
+            )
+        )
+
+
+def main(
+    model_config_path: str = "config/user/model_pytorch_det_fasterrcnn_robustness.yaml",
+    num_workers: int = 0,
+) -> None:
+    print("进度: 开始执行扰动鲁棒性评估测试...")
+
+    # 1.加载配置文件
+    print("进度: 加载配置文件...")
+    user_config = load_config(model_config_path)
+    model_instantiation_config = user_config["model"]["instantiation"]
+    model_estimator_config = user_config["model"]["estimator"]
+    print("进度", "配置文件已加载完毕")
+
+    print("进度: 初始化模型...")
+    model = load_model(
+        model_instantiation_config["model_path"],
+        model_instantiation_config["model_name"],
+        model_instantiation_config["weight_path"],
+        model_instantiation_config["parameters"],
+    )
+    print("进度", "模型初始化完成")
+
+    params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.SGD(params, lr=5e-3, momentum=0.9, weight_decay=5e-4)
+    loss = None
+
+    print("进度: 创建估计器...")
+    estimator = EstimatorFactory.create(
+        model=model,
+        loss=loss,
+        optimizer=optimizer,
+        config=model_estimator_config,
     )
 
-    print("进度: 扰动鲁棒性评测完成，得到以下结果:")
-    pprint.pprint(results)
+    # 5.加载数据
+    print("进度: 加载测试数据...")
+    test_loader = load_data("fasterrcnn_test/test")
+    print("进度", "数据集已加载")
+
+    # 6.根据传入的评测类型进行评测
+    print("开始执行检测流程测试...")
+
+    print("进度: 准备鲁棒性评估配置...")
+    robustness_payload = _prepare_robustness_payload(user_config)
+
+    print("Running corruption robustness evaluation...")
+    results = evaluate_corruption_robustness(
+        estimator=estimator,
+        test_data=test_loader,
+        config=robustness_payload,
+        batch_size=1,
+    )
+    _print_results(results)
+
+    print("检测流程测试完成。")
+    print("进度: 扰动鲁棒性评估测试完成。")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as exc:  # pragma: no cover - manual execution helper
-        print(f"扰动鲁棒性测试失败: {exc}")
-        raise
+    main()

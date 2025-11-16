@@ -25,7 +25,7 @@ evaluation:
       metrics: ["map_drop_rate", "miss_rate", "false_detection_rate"]
       attacks:
         fgsm:
-          metrics: ["map_drop_rate", "miss_rate", "false_detection_rate"]
+        pgd:
   interpretability: []
   safety: []
   generalization: []
