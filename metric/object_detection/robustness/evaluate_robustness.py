@@ -1,7 +1,7 @@
 """用于评估检测模型对抗鲁棒性的入口点."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -16,6 +16,11 @@ from .adversarial import (
     AttackEvaluationResult,
     PredictionLike,
     RobustnessMetrics,
+)
+from .corruption import (
+    CorruptionEvaluationResult,
+    CorruptionRobustnessEvaluator,
+    apply_image_corruption,
 )
 
 
@@ -34,6 +39,18 @@ class AttackConfig:
     enabled: bool = True
     metrics: Optional[Tuple[str, ...]] = None
     factory_config: Optional[Dict[str, Any]] = None
+
+
+@dataclass(frozen=True)
+class CorruptionConfig:
+    """单个自然扰动评估的配置."""
+
+    name: str
+    method: str
+    enabled: bool = True
+    metrics: Optional[Tuple[str, ...]] = None
+    severities: Tuple[int, ...] = (1, 3, 5)
+    parameters: Mapping[str, Any] = field(default_factory=dict)
 
 
 def load_robustness_config(config_path: Union[str, Path]) -> Dict[str, Any]:
@@ -139,6 +156,71 @@ def evaluate_adversarial_robustness(
     return results
 
 
+def evaluate_corruption_robustness(
+    estimator,
+    test_data: Union[Iterable, Mapping[Any, Iterable]],
+    config: Optional[Mapping[str, Any]] = None,
+    config_path: Optional[Union[str, Path]] = None,
+    iou_threshold: float = 0.5,
+    batch_size: int = 1,
+) -> Dict[str, CorruptionEvaluationResult]:
+    """评估模型在自然扰动下的鲁棒性."""
+
+    if config_path:
+        config = load_robustness_config(config_path)
+    config = config or {}
+
+    print("进度: 开始收集用于扰动评测的数据集...")
+    images, targets = _collect_dataset(test_data)
+    if not images:
+        raise ValueError("测试数据必须至少包含一张图像以执行扰动评测")
+    print("进度: 数据集已准备")
+
+    ground_truths: List[PredictionLike] = [_normalize_target(target) for target in targets]
+    baseline_predictions = _run_predictions(estimator, images, batch_size=batch_size)
+
+    print("进度: 解析扰动配置...")
+    corruption_configs = _parse_corruption_configs(config)
+    if not corruption_configs:
+        return {}
+
+    evaluator = CorruptionRobustnessEvaluator(iou_threshold=iou_threshold)
+    results: Dict[str, CorruptionEvaluationResult] = {}
+
+    enabled_configs = [corruption for corruption in corruption_configs if corruption.enabled]
+    print(f"进度: 即将执行 {len(enabled_configs)} 种扰动方案...")
+    for corruption in enabled_configs:
+        for severity in corruption.severities:
+            print(
+                f"进度: 执行扰动 '{corruption.name}' (method={corruption.method}, severity={severity})"
+            )
+            corrupted_images = [
+                apply_image_corruption(image, corruption.method, severity, corruption.parameters)
+                for image in images
+            ]
+            predictions = _run_predictions(
+                estimator,
+                corrupted_images,
+                batch_size=batch_size,
+            )
+            result = evaluator.evaluate_corruption(
+                corruption.name,
+                severity,
+                baseline_predictions,
+                predictions,
+                ground_truths,
+                images,
+                corrupted_images,
+                corruption.metrics,
+            )
+            key = f"{corruption.name}_severity_{severity}"
+            results[key] = result
+            print(f"进度: 扰动 '{corruption.name}' (severity={severity}) 处理完成")
+
+    print("进度: 所有扰动评测完成")
+    return results
+
+
 def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
     """将分层的YAML负载转换为攻击选择.
 
@@ -232,6 +314,117 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
         raise ValueError("不支持的攻击配置格式")
 
     return [attack for attack in parsed if attack.enabled]
+
+
+def _parse_corruption_configs(config: Mapping[str, Any]) -> List[CorruptionConfig]:
+    """解析自然扰动配置."""
+
+    if not isinstance(config, Mapping):
+        return []
+
+    robustness_section = config.get("robustness")
+    if robustness_section is None and "evaluation" in config:
+        evaluation_section = config.get("evaluation")
+        if isinstance(evaluation_section, Mapping):
+            robustness_section = evaluation_section.get("robustness")
+
+    corruption_section = (
+        robustness_section.get("corruption") if isinstance(robustness_section, Mapping) else None
+    )
+    if corruption_section is None:
+        return []
+
+    default_metrics = _extract_corruption_metric_list(
+        corruption_section.get("default_metrics") or corruption_section.get("metrics")
+    )
+    default_severities = _extract_severity_list(corruption_section.get("default_severities"))
+
+    corruptions_payload = corruption_section.get("corruptions") or corruption_section.get("methods")
+    if corruptions_payload is None:
+        if default_metrics is not None:
+            return [
+                CorruptionConfig(
+                    name="gaussian_noise",
+                    method="gaussian_noise",
+                    metrics=default_metrics,
+                    severities=default_severities,
+                )
+            ]
+        return []
+
+    parsed: List[CorruptionConfig] = []
+    if isinstance(corruptions_payload, Mapping):
+        for name, payload in corruptions_payload.items():
+            corruption = _build_corruption_config(name, payload, default_metrics, default_severities)
+            if corruption:
+                parsed.append(corruption)
+    elif isinstance(corruptions_payload, Sequence) and not isinstance(
+        corruptions_payload, (str, bytes)
+    ):
+        for payload in corruptions_payload:
+            if isinstance(payload, str):
+                parsed.append(
+                    CorruptionConfig(
+                        name=payload,
+                        method=payload,
+                        metrics=default_metrics,
+                        severities=default_severities,
+                    )
+                )
+            elif isinstance(payload, Mapping):
+                name = payload.get("name") or payload.get("method")
+                if not name:
+                    continue
+                corruption = _build_corruption_config(name, payload, default_metrics, default_severities)
+                if corruption:
+                    parsed.append(corruption)
+    else:
+        raise ValueError("不支持的扰动配置格式")
+
+    return parsed
+
+
+def _build_corruption_config(
+    name: str,
+    payload: Any,
+    default_metrics: Optional[Tuple[str, ...]],
+    default_severities: Tuple[int, ...],
+) -> Optional[CorruptionConfig]:
+    """构建扰动配置对象."""
+
+    method_name = name
+    metrics = default_metrics
+    severities = default_severities
+    parameters: Mapping[str, Any] = {}
+    enabled = True
+
+    if isinstance(payload, bool):
+        enabled = payload
+    elif payload is None:
+        pass
+    elif isinstance(payload, str):
+        method_name = payload.strip() or name
+    elif isinstance(payload, Sequence) and not isinstance(payload, (str, bytes)):
+        severities = _extract_severity_list(payload, default_severities)
+    elif isinstance(payload, Mapping):
+        enabled = bool(payload.get("enabled", True))
+        metrics = _extract_corruption_metric_list(
+            payload.get("metrics") or payload.get("outputs"), default_metrics
+        )
+        severities = _extract_severity_list(payload.get("severities"), default_severities)
+        method_name = payload.get("method") or name
+        parameters = dict(payload.get("parameters", {}))
+    else:
+        return None
+
+    return CorruptionConfig(
+        name=name,
+        method=method_name,
+        enabled=enabled,
+        metrics=metrics,
+        severities=severities,
+        parameters=parameters,
+    )
 
 
 def _build_attack_config(
@@ -358,6 +551,65 @@ def _extract_metric_list(
             return (normalized_name,)
 
     return fallback
+
+
+def _extract_corruption_metric_list(
+    metrics_payload: Any,
+    fallback: Optional[Tuple[str, ...]] = None,
+) -> Optional[Tuple[str, ...]]:
+    if metrics_payload is None:
+        return fallback
+    allowed = {
+        "perturbation_magnitude",
+        "performance_drop_rate",
+        "perturbation_tolerance",
+    }
+
+    if isinstance(metrics_payload, Mapping):
+        include = metrics_payload.get("include")
+        return _extract_corruption_metric_list(include, fallback)
+
+    if isinstance(metrics_payload, Sequence) and not isinstance(metrics_payload, (str, bytes)):
+        normalized = []
+        for item in metrics_payload:
+            if isinstance(item, str):
+                candidate = item.strip().lower()
+                if candidate in allowed:
+                    normalized.append(candidate)
+        return tuple(normalized) if normalized else fallback
+
+    if isinstance(metrics_payload, str):
+        candidate = metrics_payload.strip().lower()
+        if candidate in allowed:
+            return (candidate,)
+
+    return fallback
+
+
+def _extract_severity_list(
+    severity_payload: Any,
+    fallback: Tuple[int, ...] = (1, 3, 5),
+) -> Tuple[int, ...]:
+    if severity_payload is None:
+        return fallback
+
+    severities: List[int] = []
+    if isinstance(severity_payload, (int, float)):
+        value = int(severity_payload)
+        if value > 0:
+            severities.append(value)
+    elif isinstance(severity_payload, Sequence) and not isinstance(
+        severity_payload, (str, bytes)
+    ):
+        for item in severity_payload:
+            if isinstance(item, (int, float)):
+                value = int(item)
+                if value > 0:
+                    severities.append(value)
+    else:
+        return fallback
+
+    return tuple(sorted(set(severities))) if severities else fallback
 
 
 def _collect_dataset(
@@ -623,7 +875,10 @@ def _to_numpy_image(image: Any) -> np.ndarray:
 __all__ = [
     "AttackConfig",
     "AttackEvaluationResult",
+    "CorruptionConfig",
+    "CorruptionEvaluationResult",
     "RobustnessMetrics",
     "evaluate_adversarial_robustness",
+    "evaluate_corruption_robustness",
     "load_robustness_config",
 ]
