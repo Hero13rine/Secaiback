@@ -20,10 +20,12 @@ class RobustnessMetrics:
     map_drop_rate(float): mAP下降率，表示模型性能下降的程度
     miss_rate(float): 漏检率，表示未检测到的真实目标比例
     false_detection_rate(float): 误检率，表示错误检测的比例
+    """
+
     map_drop_rate: float
     miss_rate: float
     false_detection_rate: float
-"""
+
 
 @dataclass(frozen=True)
 class AttackEvaluationResult:
