@@ -70,11 +70,12 @@ evaluation:
         - map_drop_rate                # mAP 下降率
         - miss_rate                    # 漏检率
         - false_detection_rate         # 误检率
+        # TODO 需要添加per class 指标
       attacks:                         # 对抗攻击配置
         # (det_optional)
         - fgsm                         # FGSM攻击
         - pgd                          # PGD攻击
-      parameters:
+      parameters:  # TODO 需要修改parameters层级
           eps: # 迭代 eps 调度
             start: 0.001               # 起始 eps
             end: 0.01                  # 结束 eps

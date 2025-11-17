@@ -29,6 +29,12 @@ evaluation:
       attacks:
         - fgsm
         - pgd
+      parameters:
+        eps:
+          start: 0.001
+          end: 0.001
+          step: 0.001
+        # 或写成列表: eps: [0.001, 0.01, 0.002]
     corruption:
       mertics:
         - perturbation_magnitude

@@ -15,19 +15,17 @@ GroundTruthLike = Union[DetectionSample, Mapping[str, Sequence[float]]]
 
 @dataclass(frozen=True)
 class RobustnessMetrics:
-    """目标检测鲁棒性指标容器.
-    Attributes:
-    map_drop_rate(float): mAP下降率，表示模型性能下降的程度
-    miss_rate(float): 漏检率，表示未检测到的真实目标比例
-    false_detection_rate(float): 误检率，表示错误检测的比例
-    """
+    """目标检测鲁棒性指标容器."""
 
     map_drop_rate: float
     miss_rate: float
     false_detection_rate: float
     per_class_clean_map: Mapping[str, float] = field(default_factory=dict)
     per_class_adversarial_map: Mapping[str, float] = field(default_factory=dict)
-    map_drop_rate_cls: Mapping[str, float] = field(default_factory=dict)
+    clean_map: float = 0.0
+    adversarial_map: float = 0.0
+    clean_miss_rate: float = 0.0
+    clean_false_detection_rate: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -91,21 +89,26 @@ class AdversarialRobustnessEvaluator:
         print(f"  进度: 计算对抗攻击后mAP...")
         adv_map, adv_per_class = self._compute_map_with_details(adv_samples, gt_samples)
 
-        print(f"  进度: 计算检测错误...")
-        misses, false_positives, gt_count, pred_count = compute_detection_errors(
+        print(f"  进度: 计算基线检测错误...")
+        baseline_errors = compute_detection_errors(
+            base_samples,
+            gt_samples,
+            self.iou_threshold,
+        )
+
+        print(f"  进度: 计算对抗检测错误...")
+        adversarial_errors = compute_detection_errors(
             adv_samples,
             gt_samples,
             self.iou_threshold,
         )
 
         metrics = self._compose_metrics(
+            normalized_metrics,
             base_map,
             adv_map,
-            misses,
-            false_positives,
-            gt_count,
-            pred_count,
-            normalized_metrics,
+            baseline_errors,
+            adversarial_errors,
             base_per_class,
             adv_per_class,
         )
@@ -118,28 +121,54 @@ class AdversarialRobustnessEvaluator:
 
     def _compose_metrics(
         self,
+        metric_filter: Optional[Mapping[str, None]],
         baseline_map: float,
         adversarial_map: float,
-        misses: int,
-        false_positives: int,
-        ground_truth_total: int,
-        prediction_total: int,
-        metric_filter: Optional[Mapping[str, None]],
+        baseline_errors: Tuple[int, int, int, int],
+        adversarial_errors: Tuple[int, int, int, int],
         baseline_per_class: Optional[Mapping[str, float]] = None,
         adversarial_per_class: Optional[Mapping[str, float]] = None,
     ) -> RobustnessMetrics:
         """创建应用可选过滤的指标容器."""
 
         map_drop_rate = self._map_drop(baseline_map, adversarial_map)
-        miss_rate = misses / ground_truth_total if ground_truth_total > 0 else 0.0
-        false_detection_rate = (
-            false_positives / prediction_total if prediction_total > 0 else 0.0
+
+        (
+            baseline_misses,
+            baseline_false_positives,
+            baseline_ground_truth_total,
+            baseline_prediction_total,
+        ) = baseline_errors
+        (
+            adversarial_misses,
+            adversarial_false_positives,
+            adversarial_ground_truth_total,
+            adversarial_prediction_total,
+        ) = adversarial_errors
+
+        ground_truth_total = (
+            adversarial_ground_truth_total or baseline_ground_truth_total
+        )
+        prediction_total = (
+            adversarial_prediction_total or baseline_prediction_total
         )
 
-        baseline_per_class = dict(baseline_per_class or {})
-        adversarial_per_class = dict(adversarial_per_class or {})
-        classwise_drop = self._compose_classwise_drop(
-            baseline_per_class, adversarial_per_class
+        miss_rate = (
+            adversarial_misses / ground_truth_total if ground_truth_total > 0 else 0.0
+        )
+        clean_miss_rate = (
+            baseline_misses / baseline_ground_truth_total
+            if baseline_ground_truth_total > 0
+            else 0.0
+        )
+
+        false_detection_rate = (
+            adversarial_false_positives / prediction_total if prediction_total > 0 else 0.0
+        )
+        clean_false_detection_rate = (
+            baseline_false_positives / baseline_prediction_total
+            if baseline_prediction_total > 0
+            else 0.0
         )
 
         metric_values: Dict[str, float] = {
@@ -161,7 +190,10 @@ class AdversarialRobustnessEvaluator:
             false_detection_rate=metric_values.get("false_detection_rate", 0.0),
             per_class_clean_map=baseline_per_class,
             per_class_adversarial_map=adversarial_per_class,
-            map_drop_rate_cls=classwise_drop,
+            clean_map=baseline_map,
+            adversarial_map=adversarial_map,
+            clean_miss_rate=clean_miss_rate,
+            clean_false_detection_rate=clean_false_detection_rate,
         )
 
     def _compute_map(
@@ -207,7 +239,7 @@ class AdversarialRobustnessEvaluator:
         return samples
 
     @staticmethod
-    def _normalize_metric_selection(
+    def _normalize_metric_selection(  # TODO 添加perclass 的参数filter
         metrics_to_report: Optional[Iterable[str]],
     ) -> Optional[Mapping[str, None]]:
         """标准化指标选择."""
@@ -244,18 +276,6 @@ class AdversarialRobustnessEvaluator:
                 continue
         return normalized
 
-    def _compose_classwise_drop(
-        self,
-        baseline_per_class: Mapping[str, float],
-        adversarial_per_class: Mapping[str, float],
-    ) -> Mapping[str, float]:
-        drop: Dict[str, float] = {}
-        keys = set(baseline_per_class.keys()) | set(adversarial_per_class.keys())
-        for key in keys:
-            baseline_value = baseline_per_class.get(key, 0.0)
-            adv_value = adversarial_per_class.get(key, 0.0)
-            drop[key] = self._map_drop(baseline_value, adv_value)
-        return drop
 __all__ = [
     "AttackEvaluationResult",
     "AdversarialRobustnessEvaluator",

@@ -1097,32 +1097,11 @@ def _normalize_target(target: Any) -> Mapping[str, Any]:
 
 
 def _clone_image(image: Any) -> torch.Tensor:
-    """克隆图像
-
-    Args:
-        image (Any): 原始图像
-
-    Returns:
-        torch.Tensor: 克隆后的图像张量
-    """
+    """克隆图像，保持与标注相同的空间尺寸."""
 
     # 处理PyTorch张量
     if isinstance(image, torch.Tensor):
-        cloned_image = image.detach().clone()
-        # 如果图像尺寸较大，则调整图像大小以减少内存使用
-        if cloned_image.numel() > 1000000:  # 如果元素数量超过100万
-            # 检查是否为3通道图像 (C, H, W)
-            if cloned_image.dim() == 3 and cloned_image.shape[0] == 3:
-                # 缩放图像到较小尺寸以减少内存使用
-                from torchvision import transforms
-                resize_transform = transforms.Resize((416, 416))  # 缩小到416x416
-                cloned_image = resize_transform(cloned_image)
-            elif cloned_image.dim() == 3 and cloned_image.shape[0] == 1:
-                # 灰度图像
-                from torchvision import transforms
-                resize_transform = transforms.Resize((416, 416))
-                cloned_image = resize_transform(cloned_image)
-        return cloned_image
+        return image.detach().clone()
 
     # 处理其他类型，转换为NumPy数组再转为张量
     array = np.array(image)
