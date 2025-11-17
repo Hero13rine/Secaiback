@@ -184,6 +184,12 @@ class AdversarialRobustnessEvaluator:
             baseline_per_class, adversarial_per_class
         )
 
+        baseline_per_class = dict(baseline_per_class or {})
+        adversarial_per_class = dict(adversarial_per_class or {})
+        classwise_drop = self._compose_classwise_drop(
+            baseline_per_class, adversarial_per_class
+        )
+
         metric_values: Dict[str, float] = {
             "map_drop_rate": map_drop_rate,
             "miss_rate": miss_rate,

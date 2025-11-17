@@ -11,21 +11,21 @@
   corruptions:
     gaussian_noise:
       description: "标准加法高斯噪声"
-      severities: [ 1, 2, 3 ]
+      severities: [ 1, 2, 3, 4, 5 ]
       parameters:
         magnitude: 0.05
     gaussian_blur:
       description: "可调节内核大小的高斯模糊"
-      severities: [ 1, 3, 5 ]
+      severities: [ 1, 2, 3, 4, 5 ]
       parameters:
         kernel_multiplier: 2
     brightness_shift:
       description: "每个图像应用的均匀亮度偏移"
-      severities: [ 2, 4 ]
+      severities: [ 1, 2, 3, 4, 5 ]
       parameters:
         max_shift: 0.25
     contrast_shift:
       description: "线性对比度缩放"
-      severities: [ 1, 3, 5 ]
+      severities: [ 1, 2, 3, 4, 5 ]
       parameters:
         max_shift: 0.4

@@ -166,7 +166,7 @@ def main(
         estimator=estimator,
         test_data=test_loader,
         config=robustness_payload,
-        batch_size=1,
+        batch_size=64,
     )
     _print_results(results)
 
