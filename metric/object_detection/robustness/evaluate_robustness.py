@@ -160,10 +160,11 @@ def evaluate_adversarial_robustness(
 
     # 解析攻击配置
     print("进度: 解析攻击配置...")
-    attack_configs, attack_metrics = _parse_attack_configs(config)
+    attack_configs, attack_metrics, attack_parameters = _parse_attack_configs(config)
     if not attack_configs:
         return {}
     metrics_to_report = attack_metrics or tuple()
+    eps_schedule = _expand_eps_schedule(attack_parameters.get("eps_schedule"))
     # 创建对抗鲁棒性评估器实例
     evaluator = AdversarialRobustnessEvaluator(
         iou_threshold=iou_threshold,
@@ -171,7 +172,7 @@ def evaluate_adversarial_robustness(
     results: Dict[str, AttackEvaluationResult] = {}
 
     # 对每种攻击进行评估
-    total_attacks = len([attack for attack in attack_configs if attack.enabled])
+    total_attacks = sum(len(eps_schedule) for attack in attack_configs if attack.enabled)
     print(f"进度: 开始执行攻击流程测试，共 {total_attacks} 种攻击...")
 
     processed_attacks = 0
@@ -179,31 +180,43 @@ def evaluate_adversarial_robustness(
         if not attack.enabled:
             continue
 
-        processed_attacks += 1
-        print(f"进度: 处理攻击 '{attack.name}' ({processed_attacks}/{total_attacks})...")
+        for eps_value in eps_schedule:
+            processed_attacks += 1
+            attack_label = attack.name
+            if eps_value is not None:
+                attack_label = f"{attack.name}_eps_{_format_eps_label(eps_value)}"
+            print(
+                f"进度: 处理攻击 '{attack_label}' ({processed_attacks}/{total_attacks})..."
+            )
 
-        # 实例化攻击对象
-        attack_instance = _instantiate_attack(estimator, attack.factory_config)
-        print("  进度: 生成对抗样本...")
-        adv_images = [
-            _generate_adversarial_image(attack_instance, image) for image in images
-        ]
-        attack_predictions = _run_predictions(
-            estimator,
-            adv_images,
-            batch_size=batch_size,
-        )
+            factory_config = _prepare_attack_factory_config(attack)
+            if eps_value is not None:
+                factory_config = _override_attack_parameter(
+                    factory_config, "eps", float(eps_value)
+                )
 
-        print(f"  进度: 评估攻击效果...")
-        result = evaluator.evaluate_attack(
-            attack.name,
-            baseline_predictions,
-            attack_predictions,
-            ground_truths,
-            metrics_to_report,
-        )
-        results[attack.name] = result
-        print(f"进度: 攻击 '{attack.name}' 处理完成")
+            # 实例化攻击对象
+            attack_instance = _instantiate_attack(estimator, factory_config)
+            print("  进度: 生成对抗样本...")
+            adv_images = [
+                _generate_adversarial_image(attack_instance, image) for image in images
+            ]
+            attack_predictions = _run_predictions(
+                estimator,
+                adv_images,
+                batch_size=batch_size,
+            )
+
+            print(f"  进度: 评估攻击效果...")
+            result = evaluator.evaluate_attack(
+                attack_label,
+                baseline_predictions,
+                attack_predictions,
+                ground_truths,
+                metrics_to_report,
+            )
+            results[attack_label] = result
+            print(f"进度: 攻击 '{attack_label}' 处理完成")
 
     print("进度: 所有攻击处理完成")
     return results
@@ -320,20 +333,22 @@ def _is_section_enabled(robustness_section: Mapping[str, Any], key: str) -> bool
     return True
 
 
-def _parse_attack_configs(config: Mapping[str, Any]) -> Tuple[List[AttackConfig], Optional[Tuple[str, ...]]]:
+def _parse_attack_configs(
+    config: Mapping[str, Any]
+) -> Tuple[List[AttackConfig], Optional[Tuple[str, ...]], Mapping[str, Any]]:
     """将分层的YAML负载转换为攻击选择和共享指标.
 
     Args:
         config (Mapping[str, Any]): 配置字典
 
     Returns:
-       Tuple[List[AttackConfig], Optional[Tuple[str, ...]]]:
-            解析后的攻击配置列表以及在顶层声明的指标.
+       Tuple[List[AttackConfig], Optional[Tuple[str, ...]], Mapping[str, Any]]:
+            解析后的攻击配置列表、在顶层声明的指标及共享参数.
 
     """
 
     if not isinstance(config, Mapping):
-        return [], None
+        return [], None, {}
 
     # 获取鲁棒性部分配置
     robustness_section = config.get("robustness")
@@ -348,7 +363,7 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> Tuple[List[AttackConfig]
     )
 
     if adversarial_section is None:
-        return [], None
+        return [], None, {}
 
     # 处理仅提供指标列表的情况（分类风格配置）
     if isinstance(adversarial_section, Sequence) and not isinstance(
@@ -362,10 +377,10 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> Tuple[List[AttackConfig]
                 name="fgsm",
                 factory_config={"method": "fgsm", "parameters": {}},
             )
-        ], default_metrics
+        ], default_metrics, {}
 
     if not isinstance(adversarial_section, Mapping):
-        return [], None
+        return [], None, {}
 
     # 提取默认指标
     metrics_payload = adversarial_section.get("metrics") or adversarial_section.get("default_metrics")
@@ -382,13 +397,114 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> Tuple[List[AttackConfig]
                     name="fgsm",
                     factory_config={"method": "fgsm", "parameters": {}},
                 )
-            ], default_metrics
-        return [], default_metrics
+            ], default_metrics, _normalize_adversarial_parameters(
+                adversarial_section.get("parameters")
+            )
+        return [], default_metrics, _normalize_adversarial_parameters(
+            adversarial_section.get("parameters")
+        )
 
     # 解析攻击配置
     parsed = _normalize_attack_declarations(attacks_payload)
 
-    return [attack for attack in parsed if attack.enabled], default_metrics
+    return (
+        [attack for attack in parsed if attack.enabled],
+        default_metrics,
+        _normalize_adversarial_parameters(adversarial_section.get("parameters")),
+    )
+
+
+def _normalize_adversarial_parameters(parameters_payload: Any) -> Mapping[str, Any]:
+    if not isinstance(parameters_payload, Mapping):
+        return {}
+
+    normalized: Dict[str, Any] = {}
+    eps_schedule = _parse_eps_schedule(parameters_payload.get("eps"))
+    if eps_schedule:
+        normalized["eps_schedule"] = eps_schedule
+    return normalized
+
+
+def _parse_eps_schedule(payload: Any) -> Optional[Tuple[float, float, float]]:
+    if payload is None:
+        return None
+
+    start: Optional[float] = None
+    end: Optional[float] = None
+    step: Optional[float] = None
+
+    if isinstance(payload, Mapping):
+        start = payload.get("start") or payload.get("begin")
+        end = payload.get("end") or payload.get("stop") or payload.get("final")
+        step = payload.get("step") or payload.get("increment")
+    elif isinstance(payload, Sequence) and len(payload) >= 3 and not isinstance(
+        payload, (str, bytes)
+    ):
+        start, end, step = payload[:3]
+    else:
+        return None
+
+    try:
+        start_f = float(start)
+        end_f = float(end)
+        step_f = float(step)
+    except (TypeError, ValueError):
+        raise ValueError("eps 参数必须包含可转换为浮点数的起始、结束和步长")
+
+    if step_f == 0:
+        raise ValueError("eps 参数的步长必须非零")
+    if step_f > 0 and start_f > end_f:
+        raise ValueError("当步长为正时，起始eps必须小于等于结束eps")
+    if step_f < 0 and start_f < end_f:
+        raise ValueError("当步长为负时，起始eps必须大于等于结束eps")
+
+    return (start_f, end_f, step_f)
+
+
+def _expand_eps_schedule(
+    schedule: Optional[Tuple[float, float, float]]
+) -> List[Optional[float]]:
+    if not schedule:
+        return [None]
+
+    start, end, step = schedule
+    values: List[float] = []
+    current = start
+    if step > 0:
+        comparator = lambda a, b: a <= b + 1e-9
+    else:
+        comparator = lambda a, b: a >= b - 1e-9
+
+    while comparator(current, end):
+        values.append(round(current, 10))
+        current += step
+
+    return values or [None]
+
+
+def _format_eps_label(eps_value: float) -> str:
+    normalized = f"{eps_value:.4f}".rstrip("0").rstrip(".")
+    return normalized or "0"
+
+
+def _prepare_attack_factory_config(attack: AttackConfig) -> Dict[str, Any]:
+    if attack.factory_config:
+        config = dict(attack.factory_config)
+    else:
+        config = {"method": attack.name, "parameters": {}}
+    parameters = dict(config.get("parameters") or {})
+    config["parameters"] = parameters
+    return config
+
+
+def _override_attack_parameter(
+    factory_config: Mapping[str, Any], parameter_name: str, value: float
+) -> Dict[str, Any]:
+    config = dict(factory_config)
+    parameters = dict(config.get("parameters") or {})
+    parameters[parameter_name] = value
+    config["parameters"] = parameters
+    return config
 
 
 def _parse_corruption_configs(config: Mapping[str, Any]) -> List[CorruptionConfig]:
