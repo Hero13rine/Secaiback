@@ -89,9 +89,6 @@ evaluation:
       metrics:                         # 泛化能力评估指标列表
         -
   fairness:
-    group_fairness:                    # 群体公平性测试
-      metrics:                         # 群体公平性评估指标列表
-        -
-    individual_fairness:               # 个体公平性测试
-      metrics:                         # 个体公平性评估指标列表
-        -
+    fairness_testing:                 # 公平性测试
+      metrics:                        # 公平性评估指标列表
+        - performance_gap

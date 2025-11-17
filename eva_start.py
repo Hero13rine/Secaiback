@@ -74,8 +74,10 @@ def main():
     # 6.根据传入的评测类型进行评测
     if task == "detection":
         from metric.object_detection.basic.basic import cal_basic
+        from metric.object_detection.fairness import evaluate_fairness_detection as calculate_fairness_metrics
     else:
         from metric.classification.basic.basic import cal_basic
+        from metric.classification.fairness.fairness_metrics import calculate_fairness_metrics
     if evaluation_type == "basic":
         cal_basic(estimator, test_loader, evaluation_config["basic"])
     elif evaluation_type == "robustness":
@@ -86,10 +88,15 @@ def main():
         evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
     
     elif evaluation_type == "fairness":
-            def sensitive_attribute_fn(images):
+            if task == "detection":
+                from metric.object_detection.fairness import evaluate_fairness_detection
+                evaluate_fairness_detection(estimator, test_loader, evaluation_config["fairness"])
+            else:
+                from metric.classification.fairness.fairness_metrics import calculate_fairness_metrics
+                def sensitive_attribute_fn(images):
                 # 示例：假设敏感属性是图像的奇偶索引
-                return np.array([i % 2 for i in range(len(images))])
-            calculate_fairness_metrics(estimator, test_loader, sensitive_attribute_fn, evaluation_config["fairness"])
+                    return np.array([i % 2 for i in range(len(images))])
+                calculate_fairness_metrics(estimator, test_loader, sensitive_attribute_fn, evaluation_config["fairness"])
 
     ResultSender.send_log("进度", "评测结束")
 
