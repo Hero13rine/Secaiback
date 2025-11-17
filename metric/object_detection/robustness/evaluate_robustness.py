@@ -39,7 +39,6 @@ class AttackConfig:
 
     name: str
     enabled: bool = True
-    metrics: Optional[Tuple[str, ...]] = None
     factory_config: Optional[Dict[str, Any]] = None
 
 
@@ -109,10 +108,10 @@ def evaluate_adversarial_robustness(
 
     # 解析攻击配置
     print("进度: 解析攻击配置...")
-    attack_configs = _parse_attack_configs(config)
+    attack_configs, attack_metrics = _parse_attack_configs(config)
     if not attack_configs:
         return {}
-
+    metrics_to_report = attack_metrics or tuple()
     # 创建对抗鲁棒性评估器实例
     evaluator = AdversarialRobustnessEvaluator(
         iou_threshold=iou_threshold,
@@ -149,7 +148,7 @@ def evaluate_adversarial_robustness(
             baseline_predictions,
             attack_predictions,
             ground_truths,
-            attack.metrics,
+            metrics_to_report,
         )
         results[attack.name] = result
         print(f"进度: 攻击 '{attack.name}' 处理完成")
@@ -223,18 +222,20 @@ def evaluate_corruption_robustness(
     return results
 
 
-def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
-    """将分层的YAML负载转换为攻击选择.
+def _parse_attack_configs(config: Mapping[str, Any]) -> Tuple[List[AttackConfig], Optional[Tuple[str, ...]]]:
+    """将分层的YAML负载转换为攻击选择和共享指标.
 
     Args:
         config (Mapping[str, Any]): 配置字典
 
     Returns:
-        List[AttackConfig]: 解析后的攻击配置列表
+       Tuple[List[AttackConfig], Optional[Tuple[str, ...]]]:
+            解析后的攻击配置列表以及在顶层声明的指标.
+
     """
 
     if not isinstance(config, Mapping):
-        return []
+        return [], None
 
     # 获取鲁棒性部分配置
     robustness_section = config.get("robustness")
@@ -249,7 +250,7 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
     )
 
     if adversarial_section is None:
-        return []
+        return [], None
 
     # 处理仅提供指标列表的情况（分类风格配置）
     if isinstance(adversarial_section, Sequence) and not isinstance(
@@ -261,18 +262,17 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
         return [
             AttackConfig(
                 name="fgsm",
-                metrics=default_metrics,
                 factory_config={"method": "fgsm", "parameters": {}},
             )
-        ]
+        ], default_metrics
 
     if not isinstance(adversarial_section, Mapping):
-        return []
+        return [], None
 
     # 提取默认指标
-    default_metrics = _extract_metric_list(
-        adversarial_section.get("default_metrics") or adversarial_section.get("metrics")
-    )
+    metrics_payload = adversarial_section.get("metrics") or adversarial_section.get("default_metrics")
+    default_metrics = _extract_metric_list(metrics_payload)
+
     attacks_payload = adversarial_section.get("attacks")
 
     # 如果没有明确指定攻击，则根据默认指标创建FGSM攻击
@@ -282,17 +282,16 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
             return [
                 AttackConfig(
                     name="fgsm",
-                    metrics=default_metrics,
                     factory_config={"method": "fgsm", "parameters": {}},
                 )
-            ]
-        return []
+            ], default_metrics
+        return [], default_metrics
 
     # 解析攻击配置
     parsed: List[AttackConfig] = []
     if isinstance(attacks_payload, Mapping):
         for name, payload in attacks_payload.items():
-            attack = _build_attack_config(name, payload, default_metrics)
+            attack = _build_attack_config(name, payload)
             if attack:
                 parsed.append(attack)
     elif isinstance(attacks_payload, Sequence) and not isinstance(attacks_payload, (str, bytes)):
@@ -301,7 +300,6 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
                 parsed.append(
                     AttackConfig(
                         name=payload,
-                        metrics=default_metrics,
                         factory_config={"method": payload, "parameters": {}},
                     )
                 )
@@ -309,13 +307,13 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> List[AttackConfig]:
                 name = payload.get("name") or payload.get("method")
                 if not name:
                     continue
-                attack = _build_attack_config(name, payload, default_metrics)
+                attack = _build_attack_config(name, payload)
                 if attack:
                     parsed.append(attack)
     else:
         raise ValueError("不支持的攻击配置格式")
 
-    return [attack for attack in parsed if attack.enabled]
+    return [attack for attack in parsed if attack.enabled], default_metrics
 
 
 def _parse_corruption_configs(config: Mapping[str, Any]) -> List[CorruptionConfig]:
@@ -517,7 +515,6 @@ def _build_corruption_config(
 def _build_attack_config(
     name: str,
     payload: Any,
-    default_metrics: Optional[Tuple[str, ...]],
 ) -> Optional[AttackConfig]:
     """构建攻击配置对象
 
@@ -535,7 +532,6 @@ def _build_attack_config(
         return AttackConfig(
             name=name,
             enabled=payload,
-            metrics=default_metrics,
             factory_config={"method": name, "parameters": {}},
         )
 
@@ -543,7 +539,6 @@ def _build_attack_config(
     if payload is None:
         return AttackConfig(
             name=name,
-            metrics=default_metrics,
             factory_config={"method": name, "parameters": {}},
         )
 
@@ -552,16 +547,13 @@ def _build_attack_config(
         method_name = payload.strip() or name
         return AttackConfig(
             name=name,
-            metrics=default_metrics,
             factory_config={"method": method_name, "parameters": {}},
         )
 
     # 处理序列类型的payload
     if isinstance(payload, Sequence) and not isinstance(payload, (str, bytes)):
-        metrics = _extract_metric_list(payload, default_metrics)
         return AttackConfig(
             name=name,
-            metrics=metrics,
             factory_config={"method": name, "parameters": {}},
         )
 
@@ -571,12 +563,9 @@ def _build_attack_config(
 
     # 处理字典类型的payload
     enabled = bool(payload.get("enabled", True))
-    metrics = _extract_metric_list(
-        payload.get("metrics") or payload.get("outputs"), default_metrics
-    )
     method_name = payload.get("method") or name
-    parameters_payload = payload.get("parameters") or {}
-    parameters = dict(parameters_payload) if isinstance(parameters_payload, Mapping) else {}
+    # 参数已经在 config/attack 中统一管理，因此这里始终传递空字典
+    parameters: Dict[str, Any] = {}
 
     # 处理工厂配置
     factory_payload = payload.get("factory_config")
@@ -591,7 +580,6 @@ def _build_attack_config(
     return AttackConfig(
         name=name,
         enabled=enabled,
-        metrics=metrics,
         factory_config=factory_config,
     )
 

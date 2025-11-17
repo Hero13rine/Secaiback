@@ -1,14 +1,18 @@
-"""Entry script showcasing corruption robustness evaluation for detection models."""
+"""Entry script showcasing adversarial robustness evaluation for detection models."""
 from __future__ import annotations
 
+import importlib
+import json
 from typing import Any, Mapping, Sequence
 
 import torch
+from torch.utils.data import DataLoader
+import torchvision.transforms as transforms
 
 from estimator import EstimatorFactory
 from metric.object_detection.robustness import (
-    CorruptionEvaluationResult,
-    evaluate_corruption_robustness,
+    AttackEvaluationResult,
+    evaluate_adversarial_robustness,
 )
 from method import load_config
 from model import load_model
@@ -30,54 +34,69 @@ def _prepare_robustness_payload(config: Mapping[str, Any]) -> Mapping[str, Any]:
 
     return {
         "robustness": {
-            "corruption": {
-                "mertics": [
-                    "perturbation_magnitude",
-                    "performance_drop_rate",
-                    "perturbation_tolerance",
+            "adversarial": {
+                "metrics": [
+                    "map_drop_rate",
+                    "miss_rate",
+                    "false_detection_rate",
                 ],
-                "corruptions": ["gaussian_noise"],
+                "attacks": ["fgsm"],
             }
         }
     }
 
 
-def _print_results(results: Mapping[str, CorruptionEvaluationResult]) -> None:
+def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
     if not results:
-        print("No perturbation corruptions were enabled in the robustness configuration.")
+        message = "鲁棒性配置中未启用任何对抗攻击。"
+        print(message)
+        print(json.dumps({"attacks": [], "message": message}, ensure_ascii=False, indent=2))
         return
-    for corruption_name, result in results.items():
-        print(f"\n=== {corruption_name} ===")
+
+    payload = []
+    for attack_name, result in results.items():
         metrics = result.metrics
+        payload.append(
+            {
+                "attack_name": attack_name,
+                "metrics": {
+                    "map_drop_rate": metrics.map_drop_rate,
+                    "miss_rate": metrics.miss_rate,
+                    "false_detection_rate": metrics.false_detection_rate,
+                },
+            }
+        )
+
+        print(f"\n=== 攻击: {attack_name} ===")
         print(
-            "Overall - perturbation magnitude: {0:.4f}, performance drop rate: {1:.4f}, perturbation tolerance: {2:.4f}".format(
-                metrics.perturbation_magnitude,
-                metrics.performance_drop_rate,
-                metrics.perturbation_tolerance,
+            "整体指标 - mAP下降率: {0:.4f}, 漏检率: {1:.4f}, 误检率: {2:.4f}".format(
+                metrics.map_drop_rate,
+                metrics.miss_rate,
+                metrics.false_detection_rate,
             )
         )
 
+    print("\n对抗攻击评测JSON结果：")
+    print(json.dumps({"attacks": payload}, ensure_ascii=False, indent=2))
+
 
 def main(
-    model_config_path: str = "config/user/model_pytorch_det_fasterrcnn_robustness.yaml",
+    model_config_path: str = "config/user/model_pytorch_det_fasterrcnn_adversarial.yaml",
     num_workers: int = 0,
 ) -> None:
-    print("进度: 开始执行扰动鲁棒性评估测试...")
+    print("进度: 开始执行对抗鲁棒性评估-对抗共攻击测试...")
 
     # 1.加载配置文件
     print("进度: 加载配置文件...")
     user_config = load_config(model_config_path)
     model_instantiation_config = user_config["model"]["instantiation"]
     model_estimator_config = user_config["model"]["estimator"]
-    print("进度", "配置文件已加载完毕")
+    evaluation_config = user_config["evaluation"]
+    print ("进度", "配置文件已加载完毕")
 
     print("进度: 初始化模型...")
-    model = load_model(
-        model_instantiation_config["model_path"],
-        model_instantiation_config["model_name"],
-        model_instantiation_config["weight_path"],
-        model_instantiation_config["parameters"],
-    )
+    model = load_model(model_instantiation_config["model_path"], model_instantiation_config["model_name"]
+                       , model_instantiation_config["weight_path"], model_instantiation_config["parameters"])
     print("进度", "模型初始化完成")
 
     params = [p for p in model.parameters() if p.requires_grad]
@@ -103,8 +122,8 @@ def main(
     print("进度: 准备鲁棒性评估配置...")
     robustness_payload = _prepare_robustness_payload(user_config)
 
-    print("Running corruption robustness evaluation...")
-    results = evaluate_corruption_robustness(
+    print("Running adversarial robustness evaluation...")
+    results = evaluate_adversarial_robustness(
         estimator=estimator,
         test_data=test_loader,
         config=robustness_payload,
@@ -113,8 +132,6 @@ def main(
     _print_results(results)
 
     print("检测流程测试完成。")
-    print("进度: 扰动鲁棒性评估测试完成。")
-
-
+    print("进度: 对抗鲁棒性评估测试完成。")
 if __name__ == "__main__":
     main()
