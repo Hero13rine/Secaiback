@@ -71,11 +71,18 @@ evaluation:
         pgd:                           # PGD攻击方法配置
           parameters:                  # PGD攻击参数
               eps: 0.03                # 扰动强度参数
-    corruption:                        # 数据损坏鲁棒性测试
-      metrics:                         # 数据损坏评估指标列表
-        -
-      corruption_config:               # 数据损坏测试配置
-        -
+    corruption:                        # 扰动攻击鲁棒性测试
+      metrics:                         # 扰动攻击评估指标列表
+        # (optional)
+        - perturbation_magnitude
+        - performance_drop_rate
+        - perturbation_tolerance
+      corruptions:               # 扰动攻击方法
+        # (optional)
+        - gaussian_noise
+        - gaussian_blur
+        - brightness_shift
+        - contrast_shift
   interpretability:
     interpretability_testing:          # 可解释性测试
       metrics:                         # 可解释性评估指标列表
