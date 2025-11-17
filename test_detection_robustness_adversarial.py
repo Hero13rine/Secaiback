@@ -1,4 +1,4 @@
-"""Entry script showcasing adversarial robustness evaluation for detection models."""
+"""展示检测模型的对抗鲁棒性评估的条目脚本。"""
 from __future__ import annotations
 
 import importlib

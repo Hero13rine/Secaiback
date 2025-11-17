@@ -19,14 +19,24 @@ model:
       device_type: "gpu"
       batch_size: 1
 evaluation:
-  basic: ["map", "accuracy", "precision"]
+  # basic: ["map", "accuracy", "precision"]
   robustness:
     adversarial:
-      metrics: ["map_drop_rate", "miss_rate", "false_detection_rate"]
+      metrics:
+        - map_drop_rate
+        - miss_rate
+        - false_detection_rate
       attacks:
         - fgsm
         - pgd
-  interpretability: []
-  safety: []
-  generalization: []
-  fairness: []
+    corruption:
+      mertics:
+        - perturbation_magnitude
+        - performance_drop_rate
+        - perturbation_tolerance
+      # Select which corruption methods to run.
+      corruptions:
+        - gaussian_noise
+        - gaussian_blur
+        - brightness_shift
+        - contrast_shift

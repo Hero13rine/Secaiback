@@ -14,6 +14,7 @@ from .corruption import (
 from .evaluate_robustness import (
     evaluate_adversarial_robustness,
     evaluate_corruption_robustness,
+    evaluation_robustness,
     load_robustness_config,
 )
 
@@ -24,6 +25,7 @@ __all__ = [
     "CorruptionRobustnessEvaluator",
     "CorruptionRobustnessMetrics",
     "RobustnessMetrics",
+    "evaluation_robustness",
     "evaluate_adversarial_robustness",
     "evaluate_corruption_robustness",
     "load_robustness_config",

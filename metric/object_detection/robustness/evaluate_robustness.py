@@ -67,6 +67,59 @@ def load_robustness_config(config_path: Union[str, Path]) -> Dict[str, Any]:
         return yaml.safe_load(handle) or {}
 
 
+def evaluation_robustness(
+    estimator,
+    test_data: Union[Iterable, Mapping[Any, Iterable]],
+    config: Optional[Mapping[str, Any]] = None,
+    config_path: Optional[Union[str, Path]] = None,
+    iou_threshold: float = 0.5,
+    batch_size: int = 1,
+) -> Dict[str, Mapping[str, Any]]:
+    """统一入口，根据配置自动执行鲁棒性评估.
+
+    该函数会解析 ``evaluation.robustness`` 段，分别调用对抗攻击与扰动攻击的
+    评测函数，并返回统一的结果结构。
+    """
+
+    if config_path:
+        config = load_robustness_config(config_path)
+    config = _normalize_robustness_config(config)
+    robustness_section = config.get("robustness") if isinstance(config, Mapping) else None
+
+    adversarial_results: Mapping[str, Any] = {}
+    corruption_results: Mapping[str, Any] = {}
+
+    if not isinstance(robustness_section, Mapping):
+        print("进度: 配置中未找到 'evaluation.robustness' 段，跳过鲁棒性评估。")
+        return {"adversarial": adversarial_results, "corruption": corruption_results}
+
+    if _is_section_enabled(robustness_section, "adversarial"):
+        print("进度: 检测到对抗攻击配置，开始执行对抗鲁棒性评估。")
+        adversarial_results = evaluate_adversarial_robustness(
+            estimator=estimator,
+            test_data=test_data,
+            config=config,
+            iou_threshold=iou_threshold,
+            batch_size=batch_size,
+        )
+    else:
+        print("进度: 未启用对抗攻击评估，跳过。")
+
+    if _is_section_enabled(robustness_section, "corruption"):
+        print("进度: 检测到扰动攻击配置，开始执行扰动鲁棒性评估。")
+        corruption_results = evaluate_corruption_robustness(
+            estimator=estimator,
+            test_data=test_data,
+            config=config,
+            iou_threshold=iou_threshold,
+            batch_size=batch_size,
+        )
+    else:
+        print("进度: 未启用扰动攻击评估，跳过。")
+
+    return {"adversarial": adversarial_results, "corruption": corruption_results}
+
+
 def evaluate_adversarial_robustness(
     estimator,
     test_data: Union[Iterable, Mapping[Any, Iterable]],
@@ -219,6 +272,52 @@ def evaluate_corruption_robustness(
 
     print("进度: 所有扰动评测完成")
     return results
+
+
+def _normalize_robustness_config(
+    config: Optional[Mapping[str, Any]]
+) -> Mapping[str, Any]:
+    """将配置统一为包含 ``robustness`` 键的结构，便于后续解析."""
+
+    if not isinstance(config, Mapping):
+        return {}
+
+    if "robustness" in config:
+        robustness_section = config.get("robustness")
+        if isinstance(robustness_section, Mapping):
+            return {"robustness": robustness_section}
+        return config
+
+    evaluation_section = config.get("evaluation")
+    if isinstance(evaluation_section, Mapping) and "robustness" in evaluation_section:
+        return {"robustness": evaluation_section.get("robustness")}
+
+    robustness_like_keys = {"adversarial", "corruption"}
+    if robustness_like_keys & set(config.keys()):
+        return {"robustness": config}
+
+    return {}
+
+
+def _is_section_enabled(robustness_section: Mapping[str, Any], key: str) -> bool:
+    """根据子配置判断是否需要执行对应的鲁棒性评估."""
+
+    if not isinstance(robustness_section, Mapping):
+        return False
+
+    subsection = robustness_section.get(key)
+    if subsection is None or subsection is False:
+        return False
+
+    if isinstance(subsection, Mapping):
+        if subsection.get("enabled") is False:
+            return False
+        return True
+
+    if isinstance(subsection, Sequence) and not isinstance(subsection, (str, bytes)):
+        return len(subsection) > 0
+
+    return True
 
 
 def _parse_attack_configs(config: Mapping[str, Any]) -> Tuple[List[AttackConfig], Optional[Tuple[str, ...]]]:
