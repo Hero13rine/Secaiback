@@ -55,7 +55,7 @@ evaluation:
   basic:
     performance_testing:               # 基础性能测试
       metrics:                         # 性能测试指标列表
-        - accuracyD
+        - accuracy
         - precision
         - recall
         - f1score
@@ -65,20 +65,18 @@ evaluation:
     adversarial:                       # 对抗鲁棒性测试
       metrics:                         # 对抗攻击评估指标列表
         -
-      attacks:                         # 对抗攻击配置  可选(下方参数，使用什么攻击就用填写对应的攻击名称）
-        fgsm:                          # FGSM攻击方法配置
-          parameters:                  # FGSM攻击参数
-        pgd:                           # PGD攻击方法配置
-          parameters:                  # PGD攻击参数
-              eps: 0.03                # 扰动强度参数
+      attacks:                         # 对抗攻击配置
+        # (det_optional)
+        - fgsm                         # FGSM攻击方法配置
+        - pgd                          # PGD攻击方法配置
     corruption:                        # 扰动攻击鲁棒性测试
       metrics:                         # 扰动攻击评估指标列表
-        # (optional)
+        # (det_optional)
         - perturbation_magnitude
         - performance_drop_rate
         - perturbation_tolerance
       corruptions:               # 扰动攻击方法
-        # (optional)
+        # (det_optional)
         - gaussian_noise
         - gaussian_blur
         - brightness_shift

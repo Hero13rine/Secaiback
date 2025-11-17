@@ -33,7 +33,6 @@ class AttackConfig:
     Attributes:
         name (str): 攻击名称
         enabled (bool): 是否启用此攻击评估，默认为True
-        metrics (Optional[Tuple[str, ...]]): 要计算的指标列表，默认为None
         factory_config (Optional[Dict[str, Any]]): 攻击工厂配置，默认为None
     """
 
@@ -288,30 +287,7 @@ def _parse_attack_configs(config: Mapping[str, Any]) -> Tuple[List[AttackConfig]
         return [], default_metrics
 
     # 解析攻击配置
-    parsed: List[AttackConfig] = []
-    if isinstance(attacks_payload, Mapping):
-        for name, payload in attacks_payload.items():
-            attack = _build_attack_config(name, payload)
-            if attack:
-                parsed.append(attack)
-    elif isinstance(attacks_payload, Sequence) and not isinstance(attacks_payload, (str, bytes)):
-        for payload in attacks_payload:
-            if isinstance(payload, str):
-                parsed.append(
-                    AttackConfig(
-                        name=payload,
-                        factory_config={"method": payload, "parameters": {}},
-                    )
-                )
-            elif isinstance(payload, Mapping):
-                name = payload.get("name") or payload.get("method")
-                if not name:
-                    continue
-                attack = _build_attack_config(name, payload)
-                if attack:
-                    parsed.append(attack)
-    else:
-        raise ValueError("不支持的攻击配置格式")
+    parsed = _normalize_attack_declarations(attacks_payload)
 
     return [attack for attack in parsed if attack.enabled], default_metrics
 
@@ -550,13 +526,6 @@ def _build_attack_config(
             factory_config={"method": method_name, "parameters": {}},
         )
 
-    # 处理序列类型的payload
-    if isinstance(payload, Sequence) and not isinstance(payload, (str, bytes)):
-        return AttackConfig(
-            name=name,
-            factory_config={"method": name, "parameters": {}},
-        )
-
     # 不支持的类型
     if not isinstance(payload, Mapping):
         return None
@@ -582,6 +551,50 @@ def _build_attack_config(
         enabled=enabled,
         factory_config=factory_config,
     )
+
+
+def _normalize_attack_declarations(attacks_payload: Any) -> List[AttackConfig]:
+    """统一不同风格的攻击声明格式.
+
+    Args:
+        attacks_payload (Any): ``adversarial.attacks`` 键下的原始对象。
+
+    Returns:
+        List[AttackConfig]: 清洗后的攻击配置列表。
+    """
+
+    parsed: List[AttackConfig] = []
+
+    if isinstance(attacks_payload, str):
+        attack = _build_attack_config(attacks_payload, attacks_payload)
+        if attack:
+            parsed.append(attack)
+        return parsed
+
+    if isinstance(attacks_payload, Mapping):
+        for name, payload in attacks_payload.items():
+            attack = _build_attack_config(name, payload)
+            if attack:
+                parsed.append(attack)
+        return parsed
+
+    if isinstance(attacks_payload, Sequence) and not isinstance(attacks_payload, (str, bytes)):
+        for payload in attacks_payload:
+            if isinstance(payload, str):
+                attack = _build_attack_config(payload, payload)
+            elif isinstance(payload, Mapping):
+                name = payload.get("name") or payload.get("method")
+                if not name:
+                    continue
+                attack = _build_attack_config(name, payload)
+            else:
+                continue
+
+            if attack:
+                parsed.append(attack)
+        return parsed
+
+    raise ValueError("不支持的攻击配置格式")
 
 
 def _extract_metric_list(
