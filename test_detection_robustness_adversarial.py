@@ -56,6 +56,9 @@ def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
     payload = []
     for attack_name, result in results.items():
         metrics = result.metrics
+        per_class_clean = dict(metrics.per_class_clean_map)
+        per_class_adv = dict(metrics.per_class_adversarial_map)
+        per_class_drop = dict(metrics.map_drop_rate_cls)
         payload.append(
             {
                 "attack_name": attack_name,
@@ -63,6 +66,9 @@ def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
                     "map_drop_rate": metrics.map_drop_rate,
                     "miss_rate": metrics.miss_rate,
                     "false_detection_rate": metrics.false_detection_rate,
+                    "per_class_clean_map": per_class_clean,
+                    "per_class_adversarial_map": per_class_adv,
+                    "map_drop_rate_cls": per_class_drop,
                 },
             }
         )
@@ -75,6 +81,19 @@ def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
                 metrics.false_detection_rate,
             )
         )
+
+        if per_class_clean:
+            print("  Clean mAP (per class):")
+            for label, value in sorted(per_class_clean.items()):
+                print(f"    class {label}: {value:.4f}")
+        if per_class_adv:
+            print("  Adversarial mAP (per class):")
+            for label, value in sorted(per_class_adv.items()):
+                print(f"    class {label}: {value:.4f}")
+        if per_class_drop:
+            print("  mAP drop rate by class:")
+            for label, value in sorted(per_class_drop.items()):
+                print(f"    class {label}: {value:.4f}")
 
     print("\n对抗攻击评测JSON结果：")
     print(json.dumps({"attacks": payload}, ensure_ascii=False, indent=2))
