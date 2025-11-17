@@ -70,6 +70,12 @@ evaluation:
         - map_drop_rate                # mAP 下降率
         - miss_rate                    # 漏检率
         - false_detection_rate         # 误检率
+      parameters:                      # Sweep 参数；可省略
+        eps:                           # 迭代 eps 调度
+          start: 0.001                 # 起始 eps
+          end: 0.01                    # 结束 eps
+          step: 0.002                  # 每次增加幅度
+        # 也可以写成列表: eps: [0.001, 0.01, 0.002]
       attacks:                         # 对抗攻击配置
         # (det_optional)
         - fgsm                         # FGSM攻击

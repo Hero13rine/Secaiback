@@ -23,6 +23,12 @@ evaluation:
   robustness:
     adversarial:
       metrics: ["map_drop_rate", "miss_rate", "false_detection_rate"]
+      parameters:
+        eps:
+          start: 0.001
+          end: 0.01
+          step: 0.002
+        # 或写成列表: eps: [0.001, 0.01, 0.002]
       attacks:
         - fgsm
         - pgd

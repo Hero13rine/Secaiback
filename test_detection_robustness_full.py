@@ -54,6 +54,9 @@ def _format_adversarial_results(
     payload = []
     for attack_name, result in results.items():
         metrics = result.metrics
+        per_class_clean = dict(metrics.per_class_clean_map)
+        per_class_adv = dict(metrics.per_class_adversarial_map)
+        per_class_drop = dict(metrics.map_drop_rate_cls)
         payload.append(
             {
                 "attack_name": attack_name,
@@ -61,6 +64,9 @@ def _format_adversarial_results(
                     "map_drop_rate": metrics.map_drop_rate,
                     "miss_rate": metrics.miss_rate,
                     "false_detection_rate": metrics.false_detection_rate,
+                    "per_class_clean_map": per_class_clean,
+                    "per_class_adversarial_map": per_class_adv,
+                    "map_drop_rate_cls": per_class_drop,
                 },
             }
         )
@@ -73,6 +79,19 @@ def _format_adversarial_results(
                 metrics.false_detection_rate,
             )
         )
+
+        if per_class_clean:
+            print("  Clean mAP (per class):")
+            for label, value in sorted(per_class_clean.items()):
+                print(f"    class {label}: {value:.4f}")
+        if per_class_adv:
+            print("  Adversarial mAP (per class):")
+            for label, value in sorted(per_class_adv.items()):
+                print(f"    class {label}: {value:.4f}")
+        if per_class_drop:
+            print("  mAP drop rate by class:")
+            for label, value in sorted(per_class_drop.items()):
+                print(f"    class {label}: {value:.4f}")
 
     return {"attacks": payload}
 
