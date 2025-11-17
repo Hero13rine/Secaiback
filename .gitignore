@@ -23,3 +23,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# 模型权重文件
+model/weight/
+*.pth
+*.pt
