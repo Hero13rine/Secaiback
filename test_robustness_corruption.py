@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
+import json
 import torch
 
 from estimator import EstimatorFactory
@@ -31,18 +32,12 @@ def _prepare_robustness_payload(config: Mapping[str, Any]) -> Mapping[str, Any]:
     return {
         "robustness": {
             "corruption": {
-                "metrics": [
+                "mertics": [
                     "perturbation_magnitude",
                     "performance_drop_rate",
                     "perturbation_tolerance",
                 ],
-                "corruptions": {
-                    "gaussian_noise": {
-                        "method": "gaussian_noise",
-                        "severities": [1, 3, 5],
-                        "parameters": {"magnitude": 0.05},
-                    }
-                },
+                "corruptions": ["gaussian_noise"],
             }
         }
     }
@@ -50,18 +45,37 @@ def _prepare_robustness_payload(config: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def _print_results(results: Mapping[str, CorruptionEvaluationResult]) -> None:
     if not results:
-        print("No perturbation corruptions were enabled in the robustness configuration.")
+        message = "鲁棒性配置中未启用任何扰动方案。"
+        print(message)
+        print(json.dumps({"corruptions": [], "message": message}, ensure_ascii=False, indent=2))
         return
+
+    payload = []
     for corruption_name, result in results.items():
-        print(f"\n=== {corruption_name} ===")
         metrics = result.metrics
+        payload.append(
+            {
+                "corruption_name": result.corruption_name,
+                "severity": result.severity,
+                "metrics": {
+                    "perturbation_magnitude": metrics.perturbation_magnitude,
+                    "performance_drop_rate": metrics.performance_drop_rate,
+                    "perturbation_tolerance": metrics.perturbation_tolerance,
+                },
+            }
+        )
+
+        print(f"\n=== 扰动: {corruption_name} ===")
         print(
-            "Overall - perturbation magnitude: {0:.4f}, performance drop rate: {1:.4f}, perturbation tolerance: {2:.4f}".format(
+            "整体指标 - 扰动幅度: {0:.4f}, 性能下降率: {1:.4f}, 扰动容忍度: {2:.4f}".format(
                 metrics.perturbation_magnitude,
                 metrics.performance_drop_rate,
                 metrics.perturbation_tolerance,
             )
         )
+
+    print("\n扰动评测JSON结果：")
+    print(json.dumps({"corruptions": payload}, ensure_ascii=False, indent=2))
 
 
 def main(

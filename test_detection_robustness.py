@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from typing import Any, Mapping, Sequence
 
 import torch
@@ -47,18 +48,36 @@ def _prepare_robustness_payload(config: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
     if not results:
-        print("No attacks were enabled in the robustness configuration.")
+        message = "鲁棒性配置中未启用任何对抗攻击。"
+        print(message)
+        print(json.dumps({"attacks": [], "message": message}, ensure_ascii=False, indent=2))
         return
+
+    payload = []
     for attack_name, result in results.items():
-        print(f"\n=== {attack_name} ===")
         metrics = result.metrics
+        payload.append(
+            {
+                "attack_name": attack_name,
+                "metrics": {
+                    "map_drop_rate": metrics.map_drop_rate,
+                    "miss_rate": metrics.miss_rate,
+                    "false_detection_rate": metrics.false_detection_rate,
+                },
+            }
+        )
+
+        print(f"\n=== 攻击: {attack_name} ===")
         print(
-            "Overall - mAP drop: {0:.4f}, miss rate: {1:.4f}, false detection rate: {2:.4f}".format(
+            "整体指标 - mAP下降率: {0:.4f}, 漏检率: {1:.4f}, 误检率: {2:.4f}".format(
                 metrics.map_drop_rate,
                 metrics.miss_rate,
                 metrics.false_detection_rate,
             )
         )
+
+    print("\n对抗攻击评测JSON结果：")
+    print(json.dumps({"attacks": payload}, ensure_ascii=False, indent=2))
 
 
 def main(
