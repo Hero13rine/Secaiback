@@ -31,18 +31,12 @@ def _prepare_robustness_payload(config: Mapping[str, Any]) -> Mapping[str, Any]:
     return {
         "robustness": {
             "corruption": {
-                "metrics": [
+                "mertics": [
                     "perturbation_magnitude",
                     "performance_drop_rate",
                     "perturbation_tolerance",
                 ],
-                "corruptions": {
-                    "gaussian_noise": {
-                        "method": "gaussian_noise",
-                        "severities": [1, 3, 5],
-                        "parameters": {"magnitude": 0.05},
-                    }
-                },
+                "corruptions": ["gaussian_noise"],
             }
         }
     }
