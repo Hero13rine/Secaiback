@@ -14,11 +14,14 @@
 
 import numpy as np
 import torch
+import re
 from typing import Dict, List, Any, Callable
 from pathlib import Path
 from collections import defaultdict
 
-from utils.SecAISender import ResultSender
+from utils.sender import RemoteResultSender as ResultSender
+# from utils.sender import ConsoleResultSender as ResultSender # 本地调试时使用
+
 
 
 # ============================================================================
@@ -233,6 +236,21 @@ def _extract_attr_from_target(target: Any) -> str | None:
     return str(attr)
 
 
+def _normalize_attr_value(attr: Any) -> Any:
+    """
+    将类似 group_0 的标签规范为数字 0，其余保持原样。
+    """
+    if attr is None:
+        return "unknown"
+    attr_str = str(attr).strip()
+    match = re.fullmatch(r"group_(\d+)", attr_str, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    if attr_str.isdigit():
+        return int(attr_str)
+    return attr_str
+
+
 # ============================================================================
 # 3. 性能计算
 # ============================================================================
@@ -330,7 +348,7 @@ def calculate_map_for_subgroup(
 # ============================================================================
 
 def calculate_performance_gap(
-    subgroup_performances: Dict[str, float],
+    subgroup_performances: Dict[Any, float],
     metric: str = "map"
 ) -> Dict[str, Any]:
     """计算性能极差"""
@@ -408,7 +426,7 @@ def evaluate_fairness_detection(
         all_predictions = []
         all_ground_truths = []
         all_image_paths = []
-        sample_attrs: List[str] = []
+        sample_attrs: List[Any] = []
 
         batch_count = 0
         for batch_data in test_loader:
@@ -460,7 +478,7 @@ def evaluate_fairness_detection(
                     except Exception as e:
                         ResultSender.send_log("警告", f"提取失败 ({path}): {e}")
                         attr = "unknown"
-                    sample_attrs.append(attr)
+                    sample_attrs.append(_normalize_attr_value(attr))
 
             # Case 2: Detection DataLoader (images list, targets list, ...)
             elif isinstance(batch_data, (list, tuple)) and len(batch_data) >= 2:
@@ -501,35 +519,34 @@ def evaluate_fairness_detection(
                         except Exception as e:
                             ResultSender.send_log("警告", f"提取失败 ({img_path}): {e}")
                             attr = "unknown"
-                    sample_attrs.append(attr)
+                    sample_attrs.append(_normalize_attr_value(attr))
             else:
                 ResultSender.send_log("错误", f"不支持的批次格式: {type(batch_data)}")
                 continue
 
-        ResultSender.send_log("信息", f"进度: 收集完成，总样本: {len(all_predictions)}")
+        # ResultSender.send_log("信息", f"进度: 收集完成，总样本: {len(all_predictions)}")
 
         # 划分子群体
-        ResultSender.send_log("信息", "进度: 划分子群体...")
+        # ResultSender.send_log("信息", "进度: 划分子群体...")
         subgroups = defaultdict(list)
 
         if not sample_attrs and all_image_paths:
-            sample_attrs = []
             for path in all_image_paths:
                 try:
-                    sample_attrs.append(extract_sensitive_attr(path))
+                    sample_attrs.append(_normalize_attr_value(extract_sensitive_attr(path)))
                 except Exception as e:
                     ResultSender.send_log("警告", f"提取失败 ({path}): {e}")
-                    sample_attrs.append("unknown")
+                    sample_attrs.append(_normalize_attr_value("unknown"))
 
         for i, attr in enumerate(sample_attrs):
             subgroups[attr].append(i)
 
-        ResultSender.send_log("信息", f"进度: 划分为 {len(subgroups)} 个子群体:")
-        for name, indices in subgroups.items():
-            ResultSender.send_log("信息", f"进度:   {name}: {len(indices)} 样本")
+        # ResultSender.send_log("信息", f"进度: 划分为 {len(subgroups)} 个子群体:")
+        # for name, indices in subgroups.items():
+        #     # ResultSender.send_log("信息", f"进度:   {name}: {len(indices)} 样本")
 
         # 计算子群体性能
-        ResultSender.send_log("信息", "进度: 计算各子群体性能...")
+        #ResultSender.send_log("信息", "进度: 计算各子群体性能...")
         subgroup_performances = {}
 
         for name, indices in subgroups.items():
@@ -539,13 +556,13 @@ def evaluate_fairness_detection(
             try:
                 perf = calculate_map_for_subgroup(subgroup_preds, subgroup_gts, iou_threshold)
                 subgroup_performances[name] = perf
-                ResultSender.send_log("信息", f"进度:   {name}: {perf:.4f}")
+                #  ResultSender.send_log("信息", f"进度:   {name}: {perf:.4f}")
             except Exception as e:
                 ResultSender.send_log("错误", f"计算失败 ({name}): {e}")
                 subgroup_performances[name] = 0.0
 
         # 计算性能极差
-        ResultSender.send_log("信息", "进度: 计算性能极差...")
+        # ResultSender.send_log("信息", "进度: 计算性能极差...")
         gap_result = calculate_performance_gap(subgroup_performances, metric)
 
         performance_gap = float(gap_result["gap"])
@@ -554,20 +571,18 @@ def evaluate_fairness_detection(
         max_performance = float(gap_result["max_performance"])
         min_performance = float(gap_result["min_performance"])
 
-        ResultSender.send_log("信息", f"进度: 性能极差: {performance_gap:.4f}")
-        ResultSender.send_log("信息", f"进度:   最高: {max_performance:.4f} ({max_subgroup})")
-        ResultSender.send_log("信息", f"进度:   最低: {min_performance:.4f} ({min_subgroup})")
+        # ResultSender.send_log("信息", f"进度: 性能极差: {performance_gap:.4f}")
+        # ResultSender.send_log("信息", f"进度:   最高: {max_performance:.4f} ({max_subgroup})")
+        # ResultSender.send_log("信息", f"进度:   最低: {min_performance:.4f} ({min_subgroup})")
 
-        ResultSender.send_result(
-            "performance_gap", performance_gap,
-            "subgroup_performances", subgroup_performances,
-            "num_subgroups", len(subgroups),
-            "total_samples", len(all_predictions),
-            "max_subgroup", max_subgroup,
-            "min_subgroup", min_subgroup,
-            "max_performance", max_performance,
-            "min_performance", min_performance,
-        )
+        ResultSender.send_result("performance_gap", float(performance_gap))
+        ResultSender.send_result("subgroup_performances", subgroup_performances)
+        ResultSender.send_result("num_subgroups", len(subgroups))
+        ResultSender.send_result("total_samples", len(all_predictions))
+        ResultSender.send_result("max_subgroup", max_subgroup)
+        ResultSender.send_result("min_subgroup", min_subgroup)
+        ResultSender.send_result("max_performance", float(max_performance))
+        ResultSender.send_result("min_performance", float(min_performance))
 
         ResultSender.send_status("成功")
 

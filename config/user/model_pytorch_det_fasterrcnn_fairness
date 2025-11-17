@@ -19,7 +19,7 @@ model:
       device_type: "gpu"
       batch_size: 1
 evaluation:
-  basic: ["map", "accuracy", "precision"]
+  basic: ["map", "accuracy", "precision","per_class_ap"]
   robustness: []
   interpretability: []
   safety: []
