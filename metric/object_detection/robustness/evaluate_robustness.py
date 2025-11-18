@@ -160,7 +160,7 @@ def evaluate_adversarial_robustness(
 
     # 解析攻击配置
     print("进度: 解析攻击配置...")
-    attack_configs, attack_metrics, attack_parameters = _parse_attack_configs(config)
+    attack_configs, attack_metrics, attack_parameters, per_class_metrics = _parse_attack_configs(config)
     if not attack_configs:
         return {}
     metrics_to_report = attack_metrics or tuple()
@@ -214,6 +214,7 @@ def evaluate_adversarial_robustness(
                 attack_predictions,
                 ground_truths,
                 metrics_to_report,
+                per_class_metrics,
             )
             results[attack_label] = result
             print(f"进度: 攻击 '{attack_label}' 处理完成")
@@ -335,20 +336,25 @@ def _is_section_enabled(robustness_section: Mapping[str, Any], key: str) -> bool
 
 def _parse_attack_configs(
     config: Mapping[str, Any]
-) -> Tuple[List[AttackConfig], Optional[Tuple[str, ...]], Mapping[str, Any]]:
+) -> Tuple[
+    List[AttackConfig],
+    Optional[Tuple[str, ...]],
+    Mapping[str, Any],
+    Optional[Tuple[str, ...]],
+]:
     """将分层的YAML负载转换为攻击选择和共享指标.
 
     Args:
         config (Mapping[str, Any]): 配置字典
 
     Returns:
-       Tuple[List[AttackConfig], Optional[Tuple[str, ...]], Mapping[str, Any]]:
-            解析后的攻击配置列表、在顶层声明的指标及共享参数.
+       Tuple[List[AttackConfig], Optional[Tuple[str, ...]], Mapping[str, Any], Optional[Tuple[str, ...]]]:
+            解析后的攻击配置列表、在顶层声明的指标、共享参数以及逐类指标的选择.
 
     """
 
     if not isinstance(config, Mapping):
-        return [], None, {}
+        return [], None, {}, None
 
     # 获取鲁棒性部分配置
     robustness_section = config.get("robustness")
@@ -363,7 +369,7 @@ def _parse_attack_configs(
     )
 
     if adversarial_section is None:
-        return [], None, {}
+        return [], None, {}, None
 
     # 处理仅提供指标列表的情况（分类风格配置）
     if isinstance(adversarial_section, Sequence) and not isinstance(
@@ -377,14 +383,15 @@ def _parse_attack_configs(
                 name="fgsm",
                 factory_config={"method": "fgsm", "parameters": {}},
             )
-        ], default_metrics, {}
+        ], default_metrics, {}, _extract_per_class_metric_list(adversarial_section)
 
     if not isinstance(adversarial_section, Mapping):
-        return [], None, {}
+        return [], None, {}, None
 
     # 提取默认指标
     metrics_payload = adversarial_section.get("metrics") or adversarial_section.get("default_metrics")
     default_metrics = _extract_metric_list(metrics_payload)
+    per_class_metrics = _extract_per_class_metric_list(metrics_payload)
 
     attacks_payload = adversarial_section.get("attacks")
 
@@ -399,10 +406,10 @@ def _parse_attack_configs(
                 )
             ], default_metrics, _normalize_adversarial_parameters(
                 adversarial_section.get("parameters")
-            )
+            ), per_class_metrics
         return [], default_metrics, _normalize_adversarial_parameters(
             adversarial_section.get("parameters")
-        )
+        ), per_class_metrics
 
     # 解析攻击配置
     parsed = _normalize_attack_declarations(attacks_payload)
@@ -411,6 +418,7 @@ def _parse_attack_configs(
         [attack for attack in parsed if attack.enabled],
         default_metrics,
         _normalize_adversarial_parameters(adversarial_section.get("parameters")),
+        per_class_metrics,
     )
 
 
@@ -854,6 +862,66 @@ def _extract_metric_list(
             return (normalized_name,)
 
     return fallback
+
+
+def _extract_per_class_metric_list(
+    metrics_payload: Any,
+) -> Optional[Tuple[str, ...]]:
+    """提取逐类指标配置."""
+
+    def _normalize_token(token: str) -> Tuple[str, ...]:
+        normalized = token.strip().lower()
+        if normalized in {"per_class", "per-class", "per_class_map", "per_class_metrics"}:
+            return ("clean", "adversarial")
+        if normalized in {
+            "clean",
+            "clean_map",
+            "per_class_clean",
+            "per_class_clean_map",
+        }:
+            return ("clean",)
+        if normalized in {
+            "adversarial",
+            "adv",
+            "adv_map",
+            "per_class_adversarial",
+            "per_class_adversarial_map",
+        }:
+            return ("adversarial",)
+        return ()
+
+    def _collect(payload: Any) -> List[str]:
+        if payload is None:
+            return []
+        if isinstance(payload, str):
+            return list(_normalize_token(payload))
+        if isinstance(payload, Mapping):
+            tokens: List[str] = []
+            for key in ("per_class", "per-class", "per_class_metrics"):
+                if key in payload:
+                    tokens.extend(_collect(payload[key]))
+            include_payload = payload.get("include")
+            if include_payload is not None:
+                tokens.extend(_collect(include_payload))
+            return tokens
+        if isinstance(payload, Sequence):
+            tokens: List[str] = []
+            for item in payload:
+                tokens.extend(_collect(item))
+            return tokens
+        return []
+
+    tokens = _collect(metrics_payload)
+    if not tokens:
+        return None
+
+    unique: List[str] = []
+    seen = set()
+    for token in tokens:
+        if token not in seen:
+            seen.add(token)
+            unique.append(token)
+    return tuple(unique) if unique else None
 
 
 def _extract_corruption_metric_list(

@@ -64,14 +64,18 @@ evaluation:
       performance_testing_config:      # 性能测试配置参数
         -
   robustness:
-    adversarial:                       # 对抗鲁棒性测试
-      metrics:                         # 对抗攻击评估指标列表
-        # (det_optional)
-        - map_drop_rate                # mAP 下降率
-        - miss_rate                    # 漏检率
-        - false_detection_rate         # 误检率
-        # TODO 需要添加per class 指标
-      attacks:                         # 对抗攻击配置
+    adversarial:                       # adversarial robustness
+      metrics:                         # metrics requested for adversarial testing
+        include:
+          # (det_optional)
+          - map_drop_rate              # drop ratio of mAP
+          - miss_rate                  # miss rate
+          - false_detection_rate       # false detection rate
+        per_class:                     # supplemental per-class outputs (per_class/clean/adversarial)
+          include:
+            - clean                    # exposes per_class_clean_map
+            - adversarial              # exposes per_class_adversarial_map
+        attacks:
         # (det_optional)
         - fgsm                         # FGSM攻击
         - pgd                          # PGD攻击
