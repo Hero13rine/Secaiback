@@ -1,0 +1,16 @@
+# PyTorch目标检测估计器参数规范
+metadata:
+  framework: pytorch
+  task: detection
+
+parameters:
+  required:
+    - input_shape  # 例如 [3, 640, 640]
+    # - nb_classes
+    - clip_values
+  optional:
+    preprocessing: [0.0, 1.0]
+    channels_first: true
+    device_type: auto  # auto/gpu/cpu
+    score_threshold: 0.0
+

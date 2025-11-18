@@ -1,0 +1,22 @@
+# PyTorch Fasterrcnn 检测器配置
+model:
+  instantiation:
+    model_path: "/wkm/secai/secai-common/model/net/fasterrcnn.py"
+    weight_path: "/wkm/secai/secai-common/model/weight/dior_clean_best.pt"
+    model_name: "TorchvisionDetector"
+    parameters:
+        "num_classes": 20             # 你的前景类别数
+        "network": "fasterrcnn"
+        "pretrained": False             # 用 ImageNet 预训练骨干初始化
+        "trainable_backbone_layers": 3  # 可按需改 2~5
+        # 还可以放将来扩展用的键，__new__ 用 **kwargs 忽略不认识的键
+  estimator:
+    framework: "pytorch"
+    task: "detection"
+    parameters:
+      input_shape: [3, -1, -1]
+      clip_values: [0,1]
+      device: "cuda"
+      device_type: "gpu"
+evaluation:
+  basic: ["map","accuracy",'precision']

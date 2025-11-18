@@ -46,14 +46,21 @@ def load_model(
     model_class = getattr(module, class_name)
 
     # 3. 实例化模型（使用字典解包参数）
+    import traceback
+
     try:
         model = model_class(**model_args)
     except Exception as e:
-        # 增强错误提示
-        valid_args = inspect.getfullargspec(model_class.__init__).args[1:]  # 排除self
+        # 打印完整堆栈到日志（开发调试用）
+        traceback.print_exc()
+
+        valid_args = inspect.getfullargspec(model_class.__init__).args[1:]
         raise ValueError(
-            f"模型初始化参数错误，有效参数为: {valid_args}\n"
-            f"当前参数: {list(model_args.keys())}"
+            "模型初始化失败。\n"
+            f"有效参数为: {valid_args}\n"
+            f"当前参数: {list(model_args.keys())}\n"
+            f"原始错误类型: {type(e).__name__}\n"
+            f"原始错误信息: {e}"
         ) from e
 
     # 4. 加载权重
