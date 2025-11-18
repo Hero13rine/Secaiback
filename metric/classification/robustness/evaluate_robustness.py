@@ -1,4 +1,3 @@
-# 加载数据
 import numpy as np
 import torch
 from torchvision import transforms
@@ -9,7 +8,7 @@ import os
 
 from attack import AttackFactory
 from utils.SecAISender import ResultSender
-from utils.visualize import denormalize  # 导入反归一化函数
+from utils.visualize import denormalize  # 仍保留原反归一化函数
 
 from method.corruptions import (
     gaussian_noise, shot_noise, impulse_noise, speckle_noise,
@@ -18,11 +17,43 @@ from method.corruptions import (
     jpeg_compression, pixelate, elastic_transform
 )
 
-# 定义softmax函数
+# ============================================================
+# 🔧 新增：自动检测图像值域并正确反归一化显示
+# ============================================================
+def safe_to_display(img):
+    """智能检测图像值域和格式，自动转换为0-1的HWC格式以便imshow"""
+    if isinstance(img, torch.Tensor):
+        img = img.detach().cpu().numpy()
+    if img.ndim == 3 and img.shape[0] == 3:
+        img = np.transpose(img, (1, 2, 0))  # CHW -> HWC
+
+    # 自动检测值域
+    if img.max() <= 1.0 and img.min() >= 0.0:
+        # 已经是 [0,1]
+        return np.clip(img, 0, 1)
+    elif img.max() > 10:
+        # 可能是 [0,255]
+        return np.clip(img / 255.0, 0, 1)
+    elif img.min() < 0:
+        # 可能是标准化后的 [-2,2]
+        try:
+            img = denormalize(img)
+            return np.clip(img, 0, 1)
+        except Exception:
+            return np.clip((img + 1) / 2, 0, 1)
+    else:
+        return np.clip(img, 0, 1)
+
+# ============================================================
+# Softmax 函数
+# ============================================================
 def softmax(x):
     exp_x = np.exp(x - np.max(x, axis=1, keepdims=True))
     return exp_x / np.sum(exp_x, axis=1, keepdims=True)
 
+# ============================================================
+# 主函数入口：鲁棒性评测
+# ============================================================
 def evaluation_robustness(test_loader, estimator, metrics):
     ResultSender.send_log("进度", "鲁棒性评测开始")
     print("鲁棒性评测开始")
@@ -38,39 +69,36 @@ def evaluation_robustness(test_loader, estimator, metrics):
     except Exception as e:
         ResultSender.send_status("失败")
         ResultSender.send_log("错误", str(e))
-        raise  # 保留异常抛出，方便调试
+        raise
 
+# ============================================================
+# 统一预测函数（兼容4D/5D）
+# ============================================================
 def process_predictions(images_np, estimator):
-    """统一处理4维和5维数据的预测逻辑"""
-    if len(images_np.shape) == 5:  # (bs, ncrops, c, h, w) 10折裁剪数据
+    if len(images_np.shape) == 5:
         bs, ncrops, c, h, w = images_np.shape
-        images_flat = images_np.reshape(-1, c, h, w)  # 展平裁剪维度
+        images_flat = images_np.reshape(-1, c, h, w)
         outputs = estimator.predict(images_flat)
-        outputs_avg = outputs.reshape(bs, ncrops, -1).mean(axis=1)  # 平均融合
+        outputs_avg = outputs.reshape(bs, ncrops, -1).mean(axis=1)
         return outputs_avg
-    elif len(images_np.shape) == 4:  # (bs, c, h, w) 单图数据
+    elif len(images_np.shape) == 4:
         return estimator.predict(images_np)
     else:
-        raise ValueError(f"不支持的数据维度: {images_np.shape}，仅支持4维或5维")
+        raise ValueError(f"不支持的数据维度: {images_np.shape}")
 
+# ============================================================
+# 保存对抗样本对比图
+# ============================================================
 def save_comparison_images(clean_img, adv_img, true_label, clean_pred, adv_pred, index, save_dir, eps=None):
-    """保存原始图像和对抗样本的对比图"""
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
 
-    # 显示原始图像（确保是HWC格式且值在0-1之间）
-    if clean_img.shape[0] == 3:  # CHW格式
-        clean_img_vis = np.clip(denormalize(clean_img), 0, 1)
-    else:  # HWC格式
-        clean_img_vis = np.clip(clean_img / 255.0 if clean_img.max() > 1.0 else clean_img, 0, 1)
+    clean_img_vis = safe_to_display(clean_img)
+    adv_img_vis = safe_to_display(adv_img)
+
     axes[0].imshow(clean_img_vis)
     axes[0].set_title(f"Clean Image\nTrue: {true_label}, Pred: {clean_pred}")
     axes[0].axis('off')
 
-    # 显示对抗样本（确保是HWC格式且值在0-1之间）
-    if adv_img.shape[0] == 3:  # CHW格式
-        adv_img_vis = np.clip(denormalize(adv_img), 0, 1)
-    else:  # HWC格式
-        adv_img_vis = np.clip(adv_img / 255.0 if adv_img.max() > 1.0 else adv_img, 0, 1)
     axes[1].imshow(adv_img_vis)
     axes[1].set_title(f"Adversarial Image\nTrue: {true_label}, Pred: {adv_pred}")
     axes[1].axis('off')
@@ -83,6 +111,9 @@ def save_comparison_images(clean_img, adv_img, true_label, clean_pred, adv_pred,
     plt.close()
     return filename
 
+# ============================================================
+# 对抗攻击评测核心函数
+# ============================================================
 def evaluate_robustness_adv(test_loader, estimator, attack, save_images=False, save_dir="adv_examples", eps=None):
     total_uncorrect_adv = 0
     total_samples = 0
@@ -121,16 +152,13 @@ def evaluate_robustness_adv(test_loader, estimator, attack, save_images=False, s
             if attack_success[i]:
                 true_class_confidence = pred_adv_probs[i][y_batch_np[i]]
                 successful_attack_confidences.append(true_class_confidence)
-                misclassified_class = np.argmax(pred_adv_probs[i])
-                misclassified_confidence = pred_adv_probs[i][misclassified_class]
+                misclassified_confidence = np.max(pred_adv_probs[i])
                 acac_confidences.append(misclassified_confidence)
 
-            # 保存对比图像
             if save_images and saved_images_count < max_saved_images:
                 clean_pred_label = np.argmax(pred_clean_probs[i])
                 adv_pred_label = np.argmax(pred_adv_probs[i])
                 if clean_pred_label == y_batch_np[i] and attack_success[i]:
-                    # 处理5维数据时取第一个裁剪图用于可视化
                     clean_img = x_batch_np[i][0] if len(x_batch_np.shape) == 5 else x_batch_np[i]
                     adv_img = x_adv_np[i][0] if len(x_adv_np.shape) == 5 else x_adv_np[i]
                     filename = save_comparison_images(
@@ -144,48 +172,44 @@ def evaluate_robustness_adv(test_loader, estimator, attack, save_images=False, s
 
     adverr = total_uncorrect_adv / total_samples
     advacc = 1 - adverr
-    print(f"Adversarial dataset accuracy (full test set): {advacc:.2%}")
-    print(f"Adversarial dataset error (full test set): {adverr:.2%}")
+    print(f"Adversarial dataset accuracy: {advacc:.2%}")
+    print(f"Adversarial dataset error: {adverr:.2%}")
 
-    # 计算ACTC和ACAC
     actc = np.mean(successful_attack_confidences) if successful_attack_confidences else None
     acac = np.mean(acac_confidences) if acac_confidences else None
     if actc is not None:
-        print(f"actc (Average Confidence of True Class): {actc:.4f}")
+        print(f"actc: {actc:.4f}")
     else:
         print("No successful attacks found. actc cannot be calculated.")
     if acac is not None:
-        print(f"acac (Average Confidence of Adversarial Class): {acac:.4f}")
+        print(f"acac: {acac:.4f}")
     else:
         print("No successful attacks found. acac cannot be calculated.")
 
     return adverr, advacc, actc, acac
 
+# ============================================================
+# 解析攻击参数
+# ============================================================
 def parse_attack_method(attack_str, eps):
-    """将攻击方法字符串解析为包含方法和参数的字典"""
-    return {
-        "method": attack_str,
-        "parameters": {
-            "eps": eps
-        }
-    }
+    return {"method": attack_str, "parameters": {"eps": eps}}
 
+# ============================================================
+# 保存扰动对比图
+# ============================================================
 def save_corruption_comparison(clean_img, corrupted_img, true_label, clean_pred, corrupted_pred, index, save_dir,
                                corruption_name, severity):
-    """保存原始图像和扰动图像的对比图"""
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
 
-    # 显示原始图像（确保是HWC格式且值在0-1之间）
-    clean_img_display = np.clip(clean_img / 255.0 if clean_img.max() > 1.0 else clean_img, 0, 1)
+    clean_img_display = safe_to_display(clean_img)
+    corrupted_img_display = safe_to_display(corrupted_img)
+
     axes[0].imshow(clean_img_display)
-    axes[0].set_title(f"Clean Image\nTrue: {true_label}, Pred: {clean_pred}")
+    axes[0].set_title(f"Clean\nTrue: {true_label}, Pred: {clean_pred}")
     axes[0].axis('off')
 
-    # 显示扰动后的图像（确保是HWC格式且值在0-1之间）
-    corrupted_img_display = np.clip(corrupted_img / 255.0 if corrupted_img.max() > 1.0 else corrupted_img, 0, 1)
     axes[1].imshow(corrupted_img_display)
-    axes[1].set_title(
-        f"Corrupted Image\n{corruption_name} (severity={severity})\nTrue: {true_label}, Pred: {corrupted_pred}")
+    axes[1].set_title(f"{corruption_name}\nSeverity={severity}\nTrue: {true_label}, Pred: {corrupted_pred}")
     axes[1].axis('off')
 
     plt.tight_layout()
