@@ -192,7 +192,13 @@ def evaluate_robustness_adv(test_loader, estimator, attack, save_images=False, s
 # 解析攻击参数
 # ============================================================
 def parse_attack_method(attack_str, eps):
-    return {"method": attack_str, "parameters": {"eps": eps}}
+    return {
+        "method": attack_str,
+        "parameters": {
+            "eps": eps,
+            "step_size": 0.005
+        }
+    }
 
 # ============================================================
 # 保存扰动对比图
@@ -221,9 +227,9 @@ def save_corruption_comparison(clean_img, corrupted_img, true_label, clean_pred,
 def evaluate_robustness_adv_all(test_loader, estimator, metrics):
     ResultSender.send_log("进度", "对抗攻击评测开始")
     attack_method = ["fgsm"]
-    eps_list = [round(eps, 1) for eps in np.arange(0.0, 1.1, 0.1)]
+    eps_list = [round(eps, 3) for eps in np.arange(0, 0.101, 0.001)]
     eps_results = {}
-    selected_eps_for_saving = [0.3, 0.6] if len(eps_list) > 1 else [eps_list[0]]
+    selected_eps_for_saving = [0.003, 0.006] if len(eps_list) > 1 else [eps_list[0]]
 
     for attack_name in attack_method:
         for eps in eps_list:
@@ -359,7 +365,7 @@ def evaluate_robustness_corruptions(test_loader, estimator, metrics):
     ]
     severity_levels = [1, 2, 3, 4, 5]
     asr_total = 0
-    selected_severity_for_saving = [2, 4] if len(severity_levels) > 1 else [severity_levels[0]]
+    selected_severity_for_saving = [1, 2] if len(severity_levels) > 1 else [severity_levels[0]]
 
     for corruption_function in corruption_functions:
         corruption_name = corruption_function.__name__
