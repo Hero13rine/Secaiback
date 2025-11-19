@@ -13,6 +13,18 @@ PredictionLike = Union[DetectionSample, Mapping[str, Sequence[float]]]
 GroundTruthLike = Union[DetectionSample, Mapping[str, Sequence[float]]]
 
 
+# 允许的指标配置（在 evaluate_robustness 中共用）
+SCALAR_ROBUSTNESS_METRICS = frozenset({"map_drop_rate", "miss_rate", "false_detection_rate"})
+PER_CLASS_METRIC_NAME = "per_class_map"
+PER_CLASS_METRIC_ALIASES = frozenset(
+    {"per_class_map", "per_class_ap", "per_class_clean_map", "per_class_adversarial_map"}
+)
+ALL_METRIC_ALIASES = {
+    **{metric: metric for metric in SCALAR_ROBUSTNESS_METRICS},
+    **{alias: PER_CLASS_METRIC_NAME for alias in PER_CLASS_METRIC_ALIASES},
+}
+
+
 @dataclass(frozen=True)
 class RobustnessMetrics:
     """目标检测鲁棒性指标容器."""
@@ -59,12 +71,10 @@ class AdversarialRobustnessEvaluator:
         adversarial_predictions: Sequence[PredictionLike],
         ground_truths: Sequence[GroundTruthLike],
         metrics_to_report: Optional[Iterable[str]] = None,
-        per_class_metrics: Optional[Iterable[str]] = None,
     ) -> AttackEvaluationResult:
         """评估单个对抗攻击."""
 
         normalized_metrics = self._normalize_metric_selection(metrics_to_report)
-        per_class_filter = self._normalize_per_class_selection(per_class_metrics)
 
         base_samples = self._to_samples(
             baseline_predictions,
@@ -113,7 +123,6 @@ class AdversarialRobustnessEvaluator:
             adversarial_errors,
             base_per_class,
             adv_per_class,
-            per_class_filter,
         )
 
         print(f"  进度: 攻击 '{attack_name}' 评估完成")
@@ -131,7 +140,6 @@ class AdversarialRobustnessEvaluator:
         adversarial_errors: Tuple[int, int, int, int],
         baseline_per_class: Optional[Mapping[str, float]] = None,
         adversarial_per_class: Optional[Mapping[str, float]] = None,
-        per_class_filter: Optional[Mapping[str, None]] = None,
     ) -> RobustnessMetrics:
         """创建应用可选过滤的指标容器."""
 
@@ -181,6 +189,10 @@ class AdversarialRobustnessEvaluator:
             "false_detection_rate": false_detection_rate,
         }
 
+        include_per_class_metrics = (
+            metric_filter is None or PER_CLASS_METRIC_NAME in metric_filter
+        )
+
         if metric_filter:
             metric_values = {
                 key: metric_values[key]
@@ -188,18 +200,15 @@ class AdversarialRobustnessEvaluator:
                 if key in metric_filter
             }
 
-        baseline_per_class = baseline_per_class or {}
-        adversarial_per_class = adversarial_per_class or {}
-
-        include_clean = per_class_filter is None or "clean" in per_class_filter
-        include_adv = per_class_filter is None or "adversarial" in per_class_filter
+        per_class_clean = baseline_per_class if include_per_class_metrics else None
+        per_class_adv = adversarial_per_class if include_per_class_metrics else None
 
         return RobustnessMetrics(
             map_drop_rate=metric_values.get("map_drop_rate", 0.0),
             miss_rate=metric_values.get("miss_rate", 0.0),
             false_detection_rate=metric_values.get("false_detection_rate", 0.0),
-            per_class_clean_map=baseline_per_class if include_clean else {},
-            per_class_adversarial_map=adversarial_per_class if include_adv else {},
+            per_class_clean_map=per_class_clean or {},
+            per_class_adversarial_map=per_class_adv or {},
             clean_map=baseline_map,
             adversarial_map=adversarial_map,
             clean_miss_rate=clean_miss_rate,
@@ -248,9 +257,8 @@ class AdversarialRobustnessEvaluator:
                     raise ValueError(f"不支持的样本类型: {sample_type}")
         return samples
 
-    # TODO 添加perclass 的参数filter
     @staticmethod
-    def _normalize_metric_selection(
+    def _normalize_metric_selection(  # TODO 添加perclass 的参数filter
         metrics_to_report: Optional[Iterable[str]],
     ) -> Optional[Mapping[str, None]]:
         """标准化指标选择."""
@@ -262,8 +270,9 @@ class AdversarialRobustnessEvaluator:
             if not isinstance(name, str):
                 continue
             normalized = name.strip().lower()
-            if normalized in {"map_drop_rate", "miss_rate", "false_detection_rate"}:
-                filtered[normalized] = None
+            canonical = ALL_METRIC_ALIASES.get(normalized)
+            if canonical:
+                filtered[canonical] = None
         return filtered or None
 
     @staticmethod
@@ -287,42 +296,12 @@ class AdversarialRobustnessEvaluator:
                 continue
         return normalized
 
-    @staticmethod
-    def _normalize_per_class_selection(
-        per_class_metrics: Optional[Iterable[str]],
-    ) -> Optional[Mapping[str, None]]:
-        if per_class_metrics is None:
-            return None
-
-        alias_map: Dict[str, Tuple[str, ...]] = {
-            "per_class": ("clean", "adversarial"),
-            "per_class_map": ("clean", "adversarial"),
-            "per_class_metrics": ("clean", "adversarial"),
-            "clean": ("clean",),
-            "clean_map": ("clean",),
-            "per_class_clean_map": ("clean",),
-            "adversarial": ("adversarial",),
-            "adv": ("adversarial",),
-            "adv_map": ("adversarial",),
-            "per_class_adversarial_map": ("adversarial",),
-        }
-
-        selected: Dict[str, None] = {}
-        for name in per_class_metrics:
-            if not isinstance(name, str):
-                continue
-            normalized = name.strip().lower()
-            targets = alias_map.get(normalized)
-            if not targets:
-                continue
-            for token in targets:
-                selected[token] = None
-
-        return selected or None
-
 __all__ = [
     "AttackEvaluationResult",
     "AdversarialRobustnessEvaluator",
     "PredictionLike",
     "RobustnessMetrics",
+    "ALL_METRIC_ALIASES",
+    "PER_CLASS_METRIC_NAME",
+    "SCALAR_ROBUSTNESS_METRICS",
 ]

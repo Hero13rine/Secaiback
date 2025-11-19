@@ -68,13 +68,10 @@ evaluation:
       metrics:                         # metrics requested for adversarial testing
         include:
           # (det_optional)
-          - map_drop_rate              # drop ratio of mAP
-          - miss_rate                  # miss rate
-          - false_detection_rate       # false detection rate
-        per_class:                     # supplemental per-class outputs (per_class/clean/adversarial)
-          include:
-            - clean                    # exposes per_class_clean_map
-            - adversarial              # exposes per_class_adversarial_map
+          - map_drop_rate                # mAP 下降率
+          - miss_rate                    # 漏检率
+          - false_detection_rate         # 误检率
+          - per_class_ap                 # 每个类别的clean map和鲁棒 map
         attacks:
         # (det_optional)
         - fgsm                         # FGSM攻击

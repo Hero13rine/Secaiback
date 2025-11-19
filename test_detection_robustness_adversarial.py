@@ -58,7 +58,12 @@ def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
         metrics = result.metrics
         per_class_clean = dict(metrics.per_class_clean_map)
         per_class_adv = dict(metrics.per_class_adversarial_map)
-        per_class_drop = dict(metrics.map_drop_rate_cls)
+        # per_class_drop = dict(metrics.map_drop_rate_cls)  # This property doesn't exist either
+        
+        # Calculate the increase values instead of accessing them as properties
+        miss_rate_increase = metrics.miss_rate - metrics.clean_miss_rate
+        false_detection_rate_increase = metrics.false_detection_rate - metrics.clean_false_detection_rate
+        
         payload.append(
             {
                 "attack_name": attack_name,
@@ -70,11 +75,10 @@ def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
                     "false_detection_rate": metrics.false_detection_rate,
                     "clean_miss_rate": metrics.clean_miss_rate,
                     "clean_false_detection_rate": metrics.clean_false_detection_rate,
-                    "miss_rate_increase": metrics.miss_rate_increase,
-                    "false_detection_rate_increase": metrics.false_detection_rate_increase,
+                    "miss_rate_increase": miss_rate_increase,
+                    "false_detection_rate_increase": false_detection_rate_increase,
                     "per_class_clean_map": per_class_clean,
                     "per_class_adversarial_map": per_class_adv,
-                    "map_drop_rate_cls": per_class_drop,
                 },
             }
         )
@@ -91,14 +95,14 @@ def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
             "  漏检率 Clean: {0:.4f} → Adv: {1:.4f} (Δ{2:.4f})".format(
                 metrics.clean_miss_rate,
                 metrics.miss_rate,
-                metrics.miss_rate_increase,
+                miss_rate_increase,
             )
         )
         print(
             "  误检率 Clean: {0:.4f} → Adv: {1:.4f} (Δ{2:.4f})".format(
                 metrics.clean_false_detection_rate,
                 metrics.false_detection_rate,
-                metrics.false_detection_rate_increase,
+                false_detection_rate_increase,
             )
         )
 
@@ -109,10 +113,6 @@ def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
         if per_class_adv:
             print("  Adversarial mAP (per class):")
             for label, value in sorted(per_class_adv.items()):
-                print(f"    class {label}: {value:.4f}")
-        if per_class_drop:
-            print("  mAP drop rate by class:")
-            for label, value in sorted(per_class_drop.items()):
                 print(f"    class {label}: {value:.4f}")
 
     print("\n对抗攻击评测JSON结果：")
