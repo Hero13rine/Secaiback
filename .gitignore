@@ -24,7 +24,7 @@ wheels/
 .installed.cfg
 *.egg
 
-# Model weight files
+# 模型权重文件
 model/weight/
 *.pth
 *.pt
