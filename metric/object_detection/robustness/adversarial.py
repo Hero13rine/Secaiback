@@ -43,13 +43,16 @@ class RobustnessMetrics:
 @dataclass(frozen=True)
 class AttackEvaluationResult:
     """对抗攻击评估的结构化结果.
-     Attributes:
+
+    Attributes:
         attack_name (str): 对抗攻击的标识符
-        overall (RotationRobustnessMetrics): 整体鲁棒性指标
+        metrics (RobustnessMetrics): 整体鲁棒性指标
+        metadata (Mapping[str, Any]): 附加的上下文信息, 例如调度参数
     """
 
     attack_name: str
     metrics: RobustnessMetrics
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 class AdversarialRobustnessEvaluator:
@@ -71,6 +74,7 @@ class AdversarialRobustnessEvaluator:
         adversarial_predictions: Sequence[PredictionLike],
         ground_truths: Sequence[GroundTruthLike],
         metrics_to_report: Optional[Iterable[str]] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
     ) -> AttackEvaluationResult:
         """评估单个对抗攻击."""
 
@@ -129,6 +133,7 @@ class AdversarialRobustnessEvaluator:
         return AttackEvaluationResult(
             attack_name=attack_name,
             metrics=metrics,
+            metadata=dict(metadata or {}),
         )
 
     def _compose_metrics(
