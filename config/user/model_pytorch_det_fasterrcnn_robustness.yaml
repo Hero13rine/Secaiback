@@ -26,19 +26,20 @@ evaluation:
         - map_drop_rate
         - miss_rate
         - false_detection_rate
+        - per_class_ap
       attacks:
         fgsm:
           parameters:
             eps:
               start: 0.001
-              end: 0.001
+              end: 0.002
               step: 0.001
         pgd:
           parameters:
             steps:
-              start: 10
-              end: 10
-              step: 10
+              start: 1
+              end: 2
+              step: 1
     corruption:
       mertics:
         - perturbation_magnitude
