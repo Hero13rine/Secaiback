@@ -70,7 +70,7 @@ evaluation:
         - map_drop_rate                # mAP 下降率
         - miss_rate                    # 漏检率
         - false_detection_rate         # 误检率
-        # TODO 需要添加per class 指标
+        - per_class_ap                 # 每个类别的clean map和鲁棒 map
       attacks:                         # 对抗攻击配置
         # (det_optional)
         - fgsm                         # FGSM攻击
