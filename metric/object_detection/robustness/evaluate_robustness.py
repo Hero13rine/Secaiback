@@ -3,7 +3,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 import numpy as np
 import torch
@@ -28,18 +38,24 @@ from .corruption import (
 
 
 @dataclass(frozen=True)
-class AttackConfig:
-    """单个对抗攻击评估的配置.
+class ParameterSchedule:
+    """对抗攻击调度参数."""
 
-    Attributes:
-        name (str): 攻击名称
-        enabled (bool): 是否启用此攻击评估，默认为True
-        factory_config (Optional[Dict[str, Any]]): 攻击工厂配置，默认为None
-    """
+    start: float
+    end: float
+    step: float
+    as_integer: bool = False
+
+
+@dataclass(frozen=True)
+class AttackConfig:
+    """单个对抗攻击评估的配置."""
 
     name: str
     enabled: bool = True
     factory_config: Optional[Dict[str, Any]] = None
+    sweep_parameter: Optional[str] = None
+    sweep_schedule: Optional[ParameterSchedule] = None
 
 
 @dataclass(frozen=True)
@@ -69,12 +85,12 @@ def load_robustness_config(config_path: Union[str, Path]) -> Dict[str, Any]:
 
 
 def evaluation_robustness(
-    estimator,
-    test_data: Union[Iterable, Mapping[Any, Iterable]],
-    config: Optional[Mapping[str, Any]] = None,
-    config_path: Optional[Union[str, Path]] = None,
-    iou_threshold: float = 0.5,
-    batch_size: int = 1,
+        estimator,
+        test_data: Union[Iterable, Mapping[Any, Iterable]],
+        config: Optional[Mapping[str, Any]] = None,
+        config_path: Optional[Union[str, Path]] = None,
+        iou_threshold: float = 0.5,
+        batch_size: int = 1,
 ) -> Dict[str, Mapping[str, Any]]:
     """统一入口，根据配置自动执行鲁棒性评估.
 
@@ -122,12 +138,12 @@ def evaluation_robustness(
 
 
 def evaluate_adversarial_robustness(
-    estimator,
-    test_data: Union[Iterable, Mapping[Any, Iterable]],
-    config: Optional[Mapping[str, Any]] = None,
-    config_path: Optional[Union[str, Path]] = None,
-    iou_threshold: float = 0.5,
-    batch_size: int = 1,
+        estimator,
+        test_data: Union[Iterable, Mapping[Any, Iterable]],
+        config: Optional[Mapping[str, Any]] = None,
+        config_path: Optional[Union[str, Path]] = None,
+        iou_threshold: float = 0.5,
+        batch_size: int = 1,
 ) -> Dict[str, AttackEvaluationResult]:
     """使用AttackFactory驱动的攻击评估对抗鲁棒性.
 
@@ -161,42 +177,50 @@ def evaluate_adversarial_robustness(
 
     # 解析攻击配置
     print("进度: 解析攻击配置...")
-    attack_configs, attack_metrics, attack_parameters = _parse_attack_configs(config)
+    attack_configs, attack_metrics = _parse_attack_configs(config)
     if not attack_configs:
         return {}
     metrics_to_report = attack_metrics or tuple()
-    eps_schedule = _expand_eps_schedule(attack_parameters.get("eps_schedule"))
+    attack_iterations = [
+        (attack, _expand_schedule_values(attack.sweep_schedule))
+        for attack in attack_configs
+        if attack.enabled
+    ]
+    total_attacks = sum(len(iterations) for _, iterations in attack_iterations)
     # 创建对抗鲁棒性评估器实例
     evaluator = AdversarialRobustnessEvaluator(
         iou_threshold=iou_threshold,
     )
     results: Dict[str, AttackEvaluationResult] = {}
 
-    # 对每种攻击进行评估
-    total_attacks = sum(len(eps_schedule) for attack in attack_configs if attack.enabled)
     print(f"进度: 开始执行攻击流程测试，共 {total_attacks} 种攻击...")
 
     processed_attacks = 0
-    for attack in attack_configs:
-        if not attack.enabled:
-            continue
-
-        for eps_value in eps_schedule:
+    for attack, schedule in attack_iterations:
+        for parameter_value in schedule:
             processed_attacks += 1
             attack_label = attack.name
-            if eps_value is not None:
-                attack_label = f"{attack.name}_eps_{_format_eps_label(eps_value)}"
+            metadata: Dict[str, Any] = {"attack": attack.name}
+            if (
+                    attack.sweep_parameter is not None
+                    and parameter_value is not None
+            ):
+                formatted_value = _format_parameter_value(parameter_value)
+                attack_label = (
+                    f"{attack.name}_{attack.sweep_parameter}_{formatted_value}"
+                )
+                metadata[attack.sweep_parameter] = parameter_value
+
             print(
                 f"进度: 处理攻击 '{attack_label}' ({processed_attacks}/{total_attacks})..."
             )
 
             factory_config = _prepare_attack_factory_config(attack)
-            if eps_value is not None:
+            if attack.sweep_parameter and parameter_value is not None:
                 factory_config = _override_attack_parameter(
-                    factory_config, "eps", float(eps_value)
+                    factory_config, attack.sweep_parameter, parameter_value
                 )
 
-            # 实例化攻击对象
             attack_instance = _instantiate_attack(estimator, factory_config)
             print("  进度: 生成对抗样本...")
             adv_images = [
@@ -215,6 +239,7 @@ def evaluate_adversarial_robustness(
                 attack_predictions,
                 ground_truths,
                 metrics_to_report,
+                metadata=metadata,
             )
             results[attack_label] = result
             print(f"进度: 攻击 '{attack_label}' 处理完成")
@@ -224,12 +249,12 @@ def evaluate_adversarial_robustness(
 
 
 def evaluate_corruption_robustness(
-    estimator,
-    test_data: Union[Iterable, Mapping[Any, Iterable]],
-    config: Optional[Mapping[str, Any]] = None,
-    config_path: Optional[Union[str, Path]] = None,
-    iou_threshold: float = 0.5,
-    batch_size: int = 1,
+        estimator,
+        test_data: Union[Iterable, Mapping[Any, Iterable]],
+        config: Optional[Mapping[str, Any]] = None,
+        config_path: Optional[Union[str, Path]] = None,
+        iou_threshold: float = 0.5,
+        batch_size: int = 1,
 ) -> Dict[str, CorruptionEvaluationResult]:
     """评估模型在自然扰动下的鲁棒性."""
 
@@ -289,7 +314,7 @@ def evaluate_corruption_robustness(
 
 
 def _normalize_robustness_config(
-    config: Optional[Mapping[str, Any]]
+        config: Optional[Mapping[str, Any]]
 ) -> Mapping[str, Any]:
     """将配置统一为包含 ``robustness`` 键的结构，便于后续解析."""
 
@@ -335,21 +360,21 @@ def _is_section_enabled(robustness_section: Mapping[str, Any], key: str) -> bool
 
 
 def _parse_attack_configs(
-    config: Mapping[str, Any]
-) -> Tuple[List[AttackConfig], Optional[Tuple[str, ...]], Mapping[str, Any]]:
+        config: Mapping[str, Any]
+) -> Tuple[List[AttackConfig], Optional[Tuple[str, ...]]]:
     """将分层的YAML负载转换为攻击选择和共享指标.
 
     Args:
         config (Mapping[str, Any]): 配置字典
 
     Returns:
-       Tuple[List[AttackConfig], Optional[Tuple[str, ...]], Mapping[str, Any]]:
-            解析后的攻击配置列表、在顶层声明的指标及共享参数.
+       Tuple[List[AttackConfig], Optional[Tuple[str, ...]]]:
+            解析后的攻击配置列表及在顶层声明的指标.
 
     """
 
     if not isinstance(config, Mapping):
-        return [], None, {}
+        return [], None
 
     # 获取鲁棒性部分配置
     robustness_section = config.get("robustness")
@@ -364,11 +389,11 @@ def _parse_attack_configs(
     )
 
     if adversarial_section is None:
-        return [], None, {}
+        return [], None
 
     # 处理仅提供指标列表的情况（分类风格配置）
     if isinstance(adversarial_section, Sequence) and not isinstance(
-        adversarial_section, (str, bytes)
+            adversarial_section, (str, bytes)
     ):
         # 当提供的是纯指标列表（分类风格配置）时，
         # 只记录默认值而不选择攻击
@@ -378,10 +403,10 @@ def _parse_attack_configs(
                 name="fgsm",
                 factory_config={"method": "fgsm", "parameters": {}},
             )
-        ], default_metrics, {}
+        ], default_metrics
 
     if not isinstance(adversarial_section, Mapping):
-        return [], None, {}
+        return [], None
 
     # 提取默认指标
     metrics_payload = adversarial_section.get("metrics") or adversarial_section.get("default_metrics")
@@ -398,12 +423,8 @@ def _parse_attack_configs(
                     name="fgsm",
                     factory_config={"method": "fgsm", "parameters": {}},
                 )
-            ], default_metrics, _normalize_adversarial_parameters(
-                adversarial_section.get("parameters")
-            )
-        return [], default_metrics, _normalize_adversarial_parameters(
-            adversarial_section.get("parameters")
-        )
+            ], default_metrics
+        return [], default_metrics
 
     # 解析攻击配置
     parsed = _normalize_attack_declarations(attacks_payload)
@@ -411,22 +432,30 @@ def _parse_attack_configs(
     return (
         [attack for attack in parsed if attack.enabled],
         default_metrics,
-        _normalize_adversarial_parameters(adversarial_section.get("parameters")),
     )
 
 
-def _normalize_adversarial_parameters(parameters_payload: Any) -> Mapping[str, Any]:
-    if not isinstance(parameters_payload, Mapping):
-        return {}
+def _split_attack_parameters(
+        parameters_payload: Mapping[str, Any]
+) -> Tuple[Dict[str, Any], Optional[str], Optional[ParameterSchedule]]:
+    base_parameters: Dict[str, Any] = {}
+    sweep_parameter: Optional[str] = None
+    sweep_schedule: Optional[ParameterSchedule] = None
 
-    normalized: Dict[str, Any] = {}
-    eps_schedule = _parse_eps_schedule(parameters_payload.get("eps"))
-    if eps_schedule:
-        normalized["eps_schedule"] = eps_schedule
-    return normalized
+    for key, value in parameters_payload.items():
+        schedule = _parse_parameter_schedule(value)
+        if schedule:
+            if sweep_parameter is not None:
+                raise ValueError("暂不支持为单个攻击配置多个调度参数")
+            sweep_parameter = key
+            sweep_schedule = schedule
+        else:
+            base_parameters[key] = value
+
+    return base_parameters, sweep_parameter, sweep_schedule
 
 
-def _parse_eps_schedule(payload: Any) -> Optional[Tuple[float, float, float]]:
+def _parse_parameter_schedule(payload: Any) -> Optional[ParameterSchedule]:
     if payload is None:
         return None
 
@@ -439,7 +468,7 @@ def _parse_eps_schedule(payload: Any) -> Optional[Tuple[float, float, float]]:
         end = payload.get("end") or payload.get("stop") or payload.get("final")
         step = payload.get("step") or payload.get("increment")
     elif isinstance(payload, Sequence) and len(payload) >= 3 and not isinstance(
-        payload, (str, bytes)
+            payload, (str, bytes)
     ):
         start, end, step = payload[:3]
     else:
@@ -450,26 +479,34 @@ def _parse_eps_schedule(payload: Any) -> Optional[Tuple[float, float, float]]:
         end_f = float(end)
         step_f = float(step)
     except (TypeError, ValueError):
-        raise ValueError("eps 参数必须包含可转换为浮点数的起始、结束和步长")
+        raise ValueError("参数调度必须包含可转换为浮点数的起始、结束和步长")
 
     if step_f == 0:
-        raise ValueError("eps 参数的步长必须非零")
+        raise ValueError("参数调度的步长必须非零")
     if step_f > 0 and start_f > end_f:
-        raise ValueError("当步长为正时，起始eps必须小于等于结束eps")
+        raise ValueError("当步长为正时，起始值必须小于等于结束值")
     if step_f < 0 and start_f < end_f:
-        raise ValueError("当步长为负时，起始eps必须大于等于结束eps")
+        raise ValueError("当步长为负时，起始值必须大于等于结束值")
 
-    return (start_f, end_f, step_f)
+    as_integer = all(_looks_like_int(value) for value in (start, end, step))
+    return ParameterSchedule(start=start_f, end=end_f, step=step_f, as_integer=as_integer)
 
 
-def _expand_eps_schedule(
-    schedule: Optional[Tuple[float, float, float]]
-) -> List[Optional[float]]:
+def _looks_like_int(value: Any) -> bool:
+    try:
+        return float(value).is_integer()
+    except (TypeError, ValueError):
+        return False
+
+
+def _expand_schedule_values(
+        schedule: Optional[ParameterSchedule],
+) -> List[Optional[Union[int, float]]]:
     if not schedule:
         return [None]
 
-    start, end, step = schedule
-    values: List[float] = []
+    start, end, step = schedule.start, schedule.end, schedule.step
+    values: List[Union[int, float]] = []
     current = start
     if step > 0:
         comparator = lambda a, b: a <= b + 1e-9
@@ -477,14 +514,19 @@ def _expand_eps_schedule(
         comparator = lambda a, b: a >= b - 1e-9
 
     while comparator(current, end):
-        values.append(round(current, 10))
+        values.append(current)
         current += step
 
-    return values or [None]
+    if schedule.as_integer:
+        return [int(round(value)) for value in values] or [None]
+
+    return [round(value, 10) for value in values] or [None]
 
 
-def _format_eps_label(eps_value: float) -> str:
-    normalized = f"{eps_value:.4f}".rstrip("0").rstrip(".")
+def _format_parameter_value(value: Union[int, float]) -> str:
+    if isinstance(value, int):
+        return str(value)
+    normalized = f"{value:.4f}".rstrip("0").rstrip(".")
     return normalized or "0"
 
 
@@ -499,7 +541,7 @@ def _prepare_attack_factory_config(attack: AttackConfig) -> Dict[str, Any]:
 
 
 def _override_attack_parameter(
-    factory_config: Mapping[str, Any], parameter_name: str, value: float
+        factory_config: Mapping[str, Any], parameter_name: str, value: Any
 ) -> Dict[str, Any]:
     config = dict(factory_config)
     parameters = dict(config.get("parameters") or {})
@@ -533,8 +575,8 @@ def _parse_corruption_configs(config: Mapping[str, Any]) -> List[CorruptionConfi
     )
 
     parameter_config_path = (
-        corruption_section.get("parameter_config")
-        or corruption_section.get("parameters_config")
+            corruption_section.get("parameter_config")
+            or corruption_section.get("parameters_config")
     )
     parameter_overrides = _load_corruption_parameter_overrides(parameter_config_path)
 
@@ -588,7 +630,7 @@ def _parse_corruption_configs(config: Mapping[str, Any]) -> List[CorruptionConfi
             if corruption:
                 parsed.append(corruption)
     elif isinstance(corruptions_payload, Sequence) and not isinstance(
-        corruptions_payload, (str, bytes)
+            corruptions_payload, (str, bytes)
     ):
         for payload in corruptions_payload:
             method_hint = None
@@ -622,7 +664,7 @@ def _parse_corruption_configs(config: Mapping[str, Any]) -> List[CorruptionConfi
 
 
 def _load_corruption_parameter_overrides(
-    config_path: Optional[Union[str, Path]]
+        config_path: Optional[Union[str, Path]]
 ) -> Mapping[str, Any]:
     """加载可调节的扰动参数覆盖."""
 
@@ -664,11 +706,11 @@ def _load_corruption_parameter_overrides(
 
 
 def _build_corruption_config(
-    name: str,
-    default_metrics: Optional[Tuple[str, ...]],
-    parameter_overrides: Mapping[str, Any],
-    *,
-    method_hint: Optional[str] = None,
+        name: str,
+        default_metrics: Optional[Tuple[str, ...]],
+        parameter_overrides: Mapping[str, Any],
+        *,
+        method_hint: Optional[str] = None,
 ) -> Optional[CorruptionConfig]:
     """构建扰动配置对象."""
 
@@ -705,8 +747,8 @@ def _build_corruption_config(
 
 
 def _build_attack_config(
-    name: str,
-    payload: Any,
+        name: str,
+        payload: Any,
 ) -> Optional[AttackConfig]:
     """构建攻击配置对象
 
@@ -749,23 +791,33 @@ def _build_attack_config(
     # 处理字典类型的payload
     enabled = bool(payload.get("enabled", True))
     method_name = payload.get("method") or name
-    # 参数已经在 config/attack 中统一管理，因此这里始终传递空字典
-    parameters: Dict[str, Any] = {}
+
+    parameters_payload = payload.get("parameters")
+    if isinstance(parameters_payload, Mapping):
+        base_parameters, sweep_parameter, sweep_schedule = _split_attack_parameters(
+            parameters_payload
+        )
+    else:
+        base_parameters, sweep_parameter, sweep_schedule = {}, None, None
 
     # 处理工厂配置
     factory_payload = payload.get("factory_config")
     if isinstance(factory_payload, Mapping):
+        parameters = dict(base_parameters)
+        parameters.update(factory_payload.get("parameters", {}))
         factory_config = {
             "method": factory_payload.get("method", method_name),
-            "parameters": dict(factory_payload.get("parameters", {})),
+            "parameters": parameters,
         }
     else:
-        factory_config = {"method": method_name, "parameters": parameters}
+        factory_config = {"method": method_name, "parameters": dict(base_parameters)}
 
     return AttackConfig(
         name=name,
         enabled=enabled,
         factory_config=factory_config,
+        sweep_parameter=sweep_parameter,
+        sweep_schedule=sweep_schedule,
     )
 
 
@@ -814,8 +866,8 @@ def _normalize_attack_declarations(attacks_payload: Any) -> List[AttackConfig]:
 
 
 def _extract_metric_list(
-    metrics_payload: Any,
-    fallback: Optional[Tuple[str, ...]] = None,
+        metrics_payload: Any,
+        fallback: Optional[Tuple[str, ...]] = None,
 ) -> Optional[Tuple[str, ...]]:
     """提取指标列表
 
@@ -859,8 +911,8 @@ def _extract_metric_list(
 
 
 def _extract_corruption_metric_list(
-    metrics_payload: Any,
-    fallback: Optional[Tuple[str, ...]] = None,
+        metrics_payload: Any,
+        fallback: Optional[Tuple[str, ...]] = None,
 ) -> Optional[Tuple[str, ...]]:
     if metrics_payload is None:
         return fallback
@@ -892,8 +944,8 @@ def _extract_corruption_metric_list(
 
 
 def _extract_severity_list(
-    severity_payload: Any,
-    fallback: Tuple[int, ...] = (1, 3, 5),
+        severity_payload: Any,
+        fallback: Tuple[int, ...] = (1, 3, 5),
 ) -> Tuple[int, ...]:
     if severity_payload is None:
         return fallback
@@ -904,7 +956,7 @@ def _extract_severity_list(
         if value > 0:
             severities.append(value)
     elif isinstance(severity_payload, Sequence) and not isinstance(
-        severity_payload, (str, bytes)
+            severity_payload, (str, bytes)
     ):
         for item in severity_payload:
             if isinstance(item, (int, float)):
@@ -918,7 +970,7 @@ def _extract_severity_list(
 
 
 def _collect_dataset(
-    test_data: Union[Iterable, Mapping[Any, Iterable]]
+        test_data: Union[Iterable, Mapping[Any, Iterable]]
 ) -> Tuple[List[torch.Tensor], List[Mapping[str, Any]]]:
     """收集数据集"""
 
@@ -944,9 +996,9 @@ def _collect_dataset(
 
 
 def _run_predictions(
-    estimator,
-    images: Sequence[torch.Tensor],
-    batch_size: int = 1,
+        estimator,
+        images: Sequence[torch.Tensor],
+        batch_size: int = 1,
 ) -> List[PredictionLike]:
     """运行预测
 
@@ -966,7 +1018,7 @@ def _run_predictions(
 
     # 分批处理图像并进行预测
     for start in range(0, len(images), batch_size):
-        batch = images[start : start + batch_size]
+        batch = images[start: start + batch_size]
         batch_inputs = _stack_batch(batch)
         outputs = estimator.predict(batch_inputs)
         for prediction in _to_sequence(outputs):
@@ -1021,6 +1073,7 @@ def _generate_adversarial_image(attack, image: torch.Tensor) -> torch.Tensor:
         adv_tensor = adv_tensor.to(image.device)
         adv_tensor = adv_tensor.type(image.dtype)
     return adv_tensor
+
 
 def _stack_batch(batch: Sequence[torch.Tensor]) -> torch.Tensor:
     """堆叠批次图像

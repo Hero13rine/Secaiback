@@ -74,14 +74,20 @@ evaluation:
           - per_class_ap                 # 每个类别的clean map和鲁棒 map
         attacks:
         # (det_optional)
-        - fgsm                         # FGSM攻击
-        - pgd                          # PGD攻击
-      parameters:  # TODO 需要修改parameters层级
-          eps: # 迭代 eps 调度
-            start: 0.001               # 起始 eps
-            end: 0.01                  # 结束 eps
-            step: 0.002                # 每次增加幅度
-          # 也可以写成列表: eps: [0.001, 0.01, 0.002]
+        fgsm: # FGSM攻击
+          parameters:
+            eps: # 迭代 eps 调度
+              start: 0.001             # 起始 eps
+              end: 0.01                # 结束 eps
+              step: 0.002              # 每次增加幅度
+            # 也可以写成列表: eps: [0.001, 0.01, 0.002]
+          pgd: # PGD攻击
+            parameters:
+              steps: # pgd攻击的迭代步数
+                start: 10                # 初始迭代步数
+                end: 100                 # 结束迭代步数
+                step: 10                 # 每次迭代步数增加幅度
+              # 也可以写成列表: steps: [10, 100, 10]
     corruption:                        # 扰动攻击鲁棒性测试
       metrics:                         # 扰动攻击评估指标列表
         # (det_optional)

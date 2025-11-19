@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import importlib
 import json
-from typing import Any, Mapping, Sequence
+from typing import Any, Dict, Mapping, Sequence
 
 import torch
 from torch.utils.data import DataLoader
@@ -63,25 +63,26 @@ def _print_results(results: Mapping[str, AttackEvaluationResult]) -> None:
         # Calculate the increase values instead of accessing them as properties
         miss_rate_increase = metrics.miss_rate - metrics.clean_miss_rate
         false_detection_rate_increase = metrics.false_detection_rate - metrics.clean_false_detection_rate
-        
-        payload.append(
-            {
-                "attack_name": attack_name,
-                "metrics": {
-                    "clean_map": metrics.clean_map,
-                    "adversarial_map": metrics.adversarial_map,
-                    "map_drop_rate": metrics.map_drop_rate,
-                    "miss_rate": metrics.miss_rate,
-                    "false_detection_rate": metrics.false_detection_rate,
-                    "clean_miss_rate": metrics.clean_miss_rate,
-                    "clean_false_detection_rate": metrics.clean_false_detection_rate,
-                    "miss_rate_increase": miss_rate_increase,
-                    "false_detection_rate_increase": false_detection_rate_increase,
-                    "per_class_clean_map": per_class_clean,
-                    "per_class_adversarial_map": per_class_adv,
-                },
-            }
-        )
+
+        attack_payload: Dict[str, Any] = {"attack": result.metadata.get("attack", attack_name)}
+        for key, value in result.metadata.items():
+            if key == "attack":
+                continue
+            attack_payload[key] = value
+        attack_payload["metrics"] = {
+            "clean_map": metrics.clean_map,
+            "adversarial_map": metrics.adversarial_map,
+            "map_drop_rate": metrics.map_drop_rate,
+            "miss_rate": metrics.miss_rate,
+            "false_detection_rate": metrics.false_detection_rate,
+            "clean_miss_rate": metrics.clean_miss_rate,
+            "clean_false_detection_rate": metrics.clean_false_detection_rate,
+            "miss_rate_increase": metrics.miss_rate_increase,
+            "false_detection_rate_increase": metrics.false_detection_rate_increase,
+            "per_class_clean_map": per_class_clean,
+            "per_class_adversarial_map": per_class_adv,
+        }
+        payload.append(attack_payload)
 
         print(f"\n=== 攻击: {attack_name} ===")
         print(

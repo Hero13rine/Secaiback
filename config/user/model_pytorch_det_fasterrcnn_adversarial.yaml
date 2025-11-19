@@ -24,14 +24,18 @@ evaluation:
     adversarial:
       metrics: ["map_drop_rate", "miss_rate", "false_detection_rate"]
       attacks:
-        - fgsm
-        - pgd
-      parameters:
-        eps:
-          start: 0.001
-          end: 0.001
-          step: 0.001
-        # 或写成列表: eps: [0.001, 0.01, 0.002]
+        fgsm:
+          parameters:
+            eps:
+              start: 0.001
+              end: 0.001
+              step: 0.001
+        pgd:
+          parameters:
+            steps:
+              start: 10
+              end: 10
+              step: 10
   interpretability: []
   safety: []
   generalization: []
