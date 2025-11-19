@@ -20,6 +20,7 @@ import torch
 import yaml
 
 from attack import AttackFactory
+from utils.sender import ResultSender
 
 DEFAULT_CORRUPTION_PARAMETER_CONFIG = Path("config/attack/corruption.yaml")
 
@@ -84,6 +85,67 @@ def load_robustness_config(config_path: Union[str, Path]) -> Dict[str, Any]:
         return yaml.safe_load(handle) or {}
 
 
+def _attack_result_summary(
+        results: Mapping[str, AttackEvaluationResult]
+) -> List[Mapping[str, Any]]:
+    """将对抗攻击结果转换为可发送的简洁结构."""
+
+    summary: List[Mapping[str, Any]] = []
+    for attack_name, result in results.items():
+        metrics = result.metrics
+        summary.append(
+            {
+                "attack_name": attack_name,
+                "map_drop_rate": metrics.map_drop_rate,
+                "miss_rate": metrics.miss_rate,
+                "false_detection_rate": metrics.false_detection_rate,
+            }
+        )
+    return summary
+
+
+def _corruption_result_summary(
+        results: Mapping[str, CorruptionEvaluationResult]
+) -> List[Mapping[str, Any]]:
+    """将自然扰动结果转换为可发送的简洁结构."""
+
+    summary: List[Mapping[str, Any]] = []
+    for key, result in results.items():
+        metrics = result.metrics
+        summary.append(
+            {
+                "corruption_key": key,
+                "corruption_name": result.corruption_name,
+                "severity": result.severity,
+                "perturbation_magnitude": metrics.perturbation_magnitude,
+                "performance_drop_rate": metrics.performance_drop_rate,
+                "perturbation_tolerance": metrics.perturbation_tolerance,
+            }
+        )
+    return summary
+
+
+def _publish_robustness_results(
+        adversarial_results: Mapping[str, AttackEvaluationResult],
+        corruption_results: Mapping[str, CorruptionEvaluationResult],
+) -> None:
+    """统一发送鲁棒性评测结果."""
+
+    payload: Dict[str, Any] = {}
+    if adversarial_results:
+        payload["adversarial"] = _attack_result_summary(adversarial_results)
+    if corruption_results:
+        payload["corruption"] = _corruption_result_summary(corruption_results)
+
+    if payload:
+        ResultSender.send_result("robustness", payload)
+        ResultSender.send_log("进度", "鲁棒性评测结果已发送")
+    else:
+        message = "鲁棒性配置未启用攻击或扰动评估"
+        ResultSender.send_log("提示", message)
+        ResultSender.send_result("robustness", {"message": message})
+
+
 def evaluation_robustness(
         estimator,
         test_data: Union[Iterable, Mapping[Any, Iterable]],
@@ -98,6 +160,7 @@ def evaluation_robustness(
     评测函数，并返回统一的结果结构。
     """
 
+    ResultSender.send_log("进度", "开始鲁棒性评估")
     if config_path:
         config = load_robustness_config(config_path)
     config = _normalize_robustness_config(config)
@@ -107,11 +170,13 @@ def evaluation_robustness(
     corruption_results: Mapping[str, Any] = {}
 
     if not isinstance(robustness_section, Mapping):
-        print("进度: 配置中未找到 'evaluation.robustness' 段，跳过鲁棒性评估。")
+        message = "配置中未找到 'evaluation.robustness' 段，跳过鲁棒性评估"
+        ResultSender.send_log("提示", message)
+        ResultSender.send_result("robustness", {"message": message})
         return {"adversarial": adversarial_results, "corruption": corruption_results}
 
     if _is_section_enabled(robustness_section, "adversarial"):
-        print("进度: 检测到对抗攻击配置，开始执行对抗鲁棒性评估。")
+        ResultSender.send_log("进度", "执行对抗鲁棒性评估")
         adversarial_results = evaluate_adversarial_robustness(
             estimator=estimator,
             test_data=test_data,
@@ -120,10 +185,10 @@ def evaluation_robustness(
             batch_size=batch_size,
         )
     else:
-        print("进度: 未启用对抗攻击评估，跳过。")
+        ResultSender.send_log("提示", "未启用对抗攻击评估")
 
     if _is_section_enabled(robustness_section, "corruption"):
-        print("进度: 检测到扰动攻击配置，开始执行扰动鲁棒性评估。")
+        ResultSender.send_log("进度", "执行扰动鲁棒性评估")
         corruption_results = evaluate_corruption_robustness(
             estimator=estimator,
             test_data=test_data,
@@ -132,7 +197,9 @@ def evaluation_robustness(
             batch_size=batch_size,
         )
     else:
-        print("进度: 未启用扰动攻击评估，跳过。")
+        ResultSender.send_log("提示", "未启用扰动攻击评估")
+
+    _publish_robustness_results(adversarial_results, corruption_results)
 
     return {"adversarial": adversarial_results, "corruption": corruption_results}
 
@@ -163,22 +230,24 @@ def evaluate_adversarial_robustness(
     """
 
     # 如果提供了配置文件路径，则加载配置
+    ResultSender.send_log("进度", "准备对抗鲁棒性评估数据集")
     if config_path:
         config = load_robustness_config(config_path)
     config = config or {}
-    print("进度: 开始处理数据集...")
     images, targets = _collect_dataset(test_data)
+    ResultSender.send_log("进度", f"对抗评测样本数量: {len(images)}")
     if not images:
         raise ValueError("测试数据必须至少提供一个样本")
-    print("进度", "数据集已加载")
+    ResultSender.send_log("进度", "对抗评测数据集准备完成")
 
     ground_truths: List[PredictionLike] = [_normalize_target(target) for target in targets]
     baseline_predictions = _run_predictions(estimator, images, batch_size=batch_size)
 
     # 解析攻击配置
-    print("进度: 解析攻击配置...")
+    ResultSender.send_log("进度", "解析对抗攻击配置")
     attack_configs, attack_metrics = _parse_attack_configs(config)
     if not attack_configs:
+        ResultSender.send_log("提示", "未配置对抗攻击，跳过对抗鲁棒性评估")
         return {}
     metrics_to_report = attack_metrics or tuple()
     attack_iterations = [
@@ -193,7 +262,7 @@ def evaluate_adversarial_robustness(
     )
     results: Dict[str, AttackEvaluationResult] = {}
 
-    print(f"进度: 开始执行攻击流程测试，共 {total_attacks} 种攻击...")
+    ResultSender.send_log("进度", f"共 {total_attacks} 种对抗攻击需要评测")
 
     processed_attacks = 0
     for attack, schedule in attack_iterations:
@@ -211,8 +280,9 @@ def evaluate_adversarial_robustness(
                 )
                 metadata[attack.sweep_parameter] = parameter_value
 
-            print(
-                f"进度: 处理攻击 '{attack_label}' ({processed_attacks}/{total_attacks})..."
+            ResultSender.send_log(
+                "进度",
+                f"执行攻击 {attack_label} ({processed_attacks}/{total_attacks})",
             )
 
             factory_config = _prepare_attack_factory_config(attack)
@@ -222,7 +292,6 @@ def evaluate_adversarial_robustness(
                 )
 
             attack_instance = _instantiate_attack(estimator, factory_config)
-            print("  进度: 生成对抗样本...")
             adv_images = [
                 _generate_adversarial_image(attack_instance, image) for image in images
             ]
@@ -232,7 +301,6 @@ def evaluate_adversarial_robustness(
                 batch_size=batch_size,
             )
 
-            print(f"  进度: 评估攻击效果...")
             result = evaluator.evaluate_attack(
                 attack_label,
                 baseline_predictions,
@@ -242,9 +310,12 @@ def evaluate_adversarial_robustness(
                 metadata=metadata,
             )
             results[attack_label] = result
-            print(f"进度: 攻击 '{attack_label}' 处理完成")
+            ResultSender.send_log(
+                "进度",
+                f"攻击 {attack_label} 完成 ({processed_attacks}/{total_attacks})",
+            )
 
-    print("进度: 所有攻击处理完成")
+    ResultSender.send_log("进度", "对抗鲁棒性评估完成")
     return results
 
 
@@ -258,33 +329,39 @@ def evaluate_corruption_robustness(
 ) -> Dict[str, CorruptionEvaluationResult]:
     """评估模型在自然扰动下的鲁棒性."""
 
+    ResultSender.send_log("进度", "准备扰动鲁棒性评估数据集")
     if config_path:
         config = load_robustness_config(config_path)
     config = config or {}
 
-    print("进度: 开始收集用于扰动评测的数据集...")
     images, targets = _collect_dataset(test_data)
+    ResultSender.send_log("进度", f"扰动评测样本数量: {len(images)}")
     if not images:
         raise ValueError("测试数据必须至少包含一张图像以执行扰动评测")
-    print("进度: 数据集已准备")
+    ResultSender.send_log("进度", "扰动评测数据集准备完成")
 
     ground_truths: List[PredictionLike] = [_normalize_target(target) for target in targets]
     baseline_predictions = _run_predictions(estimator, images, batch_size=batch_size)
 
-    print("进度: 解析扰动配置...")
+    ResultSender.send_log("进度", "解析扰动配置")
     corruption_configs = _parse_corruption_configs(config)
     if not corruption_configs:
+        ResultSender.send_log("提示", "未配置扰动方案，跳过扰动鲁棒性评估")
         return {}
 
     evaluator = CorruptionRobustnessEvaluator(iou_threshold=iou_threshold)
     results: Dict[str, CorruptionEvaluationResult] = {}
 
     enabled_configs = [corruption for corruption in corruption_configs if corruption.enabled]
-    print(f"进度: 即将执行 {len(enabled_configs)} 种扰动方案...")
+    ResultSender.send_log(
+        "进度",
+        f"共 {len(enabled_configs)} 种扰动方案需要评测",
+    )
     for corruption in enabled_configs:
         for severity in corruption.severities:
-            print(
-                f"进度: 执行扰动 '{corruption.name}' (method={corruption.method}, severity={severity})"
+            ResultSender.send_log(
+                "进度",
+                f"执行扰动 {corruption.name} (severity={severity})",
             )
             corrupted_images = [
                 apply_image_corruption(image, corruption.method, severity, corruption.parameters)
@@ -307,9 +384,12 @@ def evaluate_corruption_robustness(
             )
             key = f"{corruption.name}_severity_{severity}"
             results[key] = result
-            print(f"进度: 扰动 '{corruption.name}' (severity={severity}) 处理完成")
+            ResultSender.send_log(
+                "进度",
+                f"扰动 {corruption.name} (severity={severity}) 完成",
+            )
 
-    print("进度: 所有扰动评测完成")
+    ResultSender.send_log("进度", "扰动鲁棒性评估完成")
     return results
 
 
@@ -691,7 +771,10 @@ def _load_corruption_parameter_overrides(
         except FileNotFoundError:
             continue
         except OSError as exc:
-            print(f"警告: 无法读取扰动参数文件 {normalized}: {exc}")
+            ResultSender.send_log(
+                "警告",
+                f"无法读取扰动参数文件 {normalized}: {exc}",
+            )
             continue
 
         if isinstance(payload, Mapping):
