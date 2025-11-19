@@ -26,6 +26,9 @@ def safe_to_display(img):
         img = img.detach().cpu().numpy()
     if img.ndim == 3 and img.shape[0] == 3:
         img = np.transpose(img, (1, 2, 0))  # CHW -> HWC
+    elif img.ndim == 2:
+        # 灰度图像（HWC单通道）
+        pass
 
     # 自动检测值域
     if img.max() <= 1.0 and img.min() >= 0.0:
@@ -95,11 +98,15 @@ def save_comparison_images(clean_img, adv_img, true_label, clean_pred, adv_pred,
     clean_img_vis = safe_to_display(clean_img)
     adv_img_vis = safe_to_display(adv_img)
 
-    axes[0].imshow(clean_img_vis)
+    # 自动判断是否为灰度图（单通道或三通道数值一致）
+    is_clean_gray = clean_img_vis.ndim == 2 or (clean_img_vis.ndim == 3 and np.allclose(clean_img_vis[..., 0], clean_img_vis[..., 1]) and np.allclose(clean_img_vis[..., 0], clean_img_vis[..., 2]))
+    is_adv_gray = adv_img_vis.ndim == 2 or (adv_img_vis.ndim == 3 and np.allclose(adv_img_vis[..., 0], adv_img_vis[..., 1]) and np.allclose(adv_img_vis[..., 0], adv_img_vis[..., 2]))
+
+    axes[0].imshow(clean_img_vis, cmap='gray' if is_clean_gray else None)
     axes[0].set_title(f"Clean Image\nTrue: {true_label}, Pred: {clean_pred}")
     axes[0].axis('off')
 
-    axes[1].imshow(adv_img_vis)
+    axes[1].imshow(adv_img_vis, cmap='gray' if is_adv_gray else None)
     axes[1].set_title(f"Adversarial Image\nTrue: {true_label}, Pred: {adv_pred}")
     axes[1].axis('off')
 
@@ -159,6 +166,7 @@ def evaluate_robustness_adv(test_loader, estimator, attack, save_images=False, s
                 clean_pred_label = np.argmax(pred_clean_probs[i])
                 adv_pred_label = np.argmax(pred_adv_probs[i])
                 if clean_pred_label == y_batch_np[i] and attack_success[i]:
+                    # 固定取第一个裁剪图（crop_idx=0）
                     clean_img = x_batch_np[i][0] if len(x_batch_np.shape) == 5 else x_batch_np[i]
                     adv_img = x_adv_np[i][0] if len(x_adv_np.shape) == 5 else x_adv_np[i]
                     filename = save_comparison_images(
@@ -210,11 +218,15 @@ def save_corruption_comparison(clean_img, corrupted_img, true_label, clean_pred,
     clean_img_display = safe_to_display(clean_img)
     corrupted_img_display = safe_to_display(corrupted_img)
 
-    axes[0].imshow(clean_img_display)
+    # 自动判断是否为灰度图（单通道或三通道数值一致）
+    is_clean_gray = clean_img_display.ndim == 2 or (clean_img_display.ndim == 3 and np.allclose(clean_img_display[..., 0], clean_img_display[..., 1]) and np.allclose(clean_img_display[..., 0], clean_img_display[..., 2]))
+    is_corrupted_gray = corrupted_img_display.ndim == 2 or (corrupted_img_display.ndim == 3 and np.allclose(corrupted_img_display[..., 0], corrupted_img_display[..., 1]) and np.allclose(corrupted_img_display[..., 0], corrupted_img_display[..., 2]))
+
+    axes[0].imshow(clean_img_display, cmap='gray' if is_clean_gray else None)
     axes[0].set_title(f"Clean\nTrue: {true_label}, Pred: {clean_pred}")
     axes[0].axis('off')
 
-    axes[1].imshow(corrupted_img_display)
+    axes[1].imshow(corrupted_img_display, cmap='gray' if is_corrupted_gray else None)
     axes[1].set_title(f"{corruption_name}\nSeverity={severity}\nTrue: {true_label}, Pred: {corrupted_pred}")
     axes[1].axis('off')
 
@@ -342,16 +354,109 @@ def evaluate_clean(test_loader, estimator):
     print(f"asr_clean (full test set): {err_clean:.2f}%")
     return err_clean
 
-def get_original_image(images, idx):
-    """从4维或5维张量中提取原始图像（用于可视化）"""
-    if len(images.shape) == 4:
-        # (bs, c, h, w) → 取单个样本并转HWC格式（0-255）
-        return images[idx].permute(1, 2, 0).numpy() * 255
-    elif len(images.shape) == 5:
-        # (bs, ncrops, c, h, w) → 取第一个裁剪图并转HWC格式（0-255）
-        return images[idx, 0].permute(1, 2, 0).numpy() * 255
+def get_original_image(images, idx, is_gray=False):
+    """
+    从4维或5维张量中提取原始图像（用于可视化）
+    固定取第一个裁剪图（crop_idx=0）
+    Args:
+        images: 输入张量（4D: [bs, c, h, w] 或 5D: [bs, ncrops, c, h, w]）
+        idx: 样本索引
+        is_gray: 是否为灰度图像（三通道数值一致）
+    Returns:
+        原始图像（HWC格式，0-255 uint8）
+    """
+    if len(images.shape) == 5:
+        # 5维数据：[bs, ncrops, c, h, w] → 固定取第一个裁剪块（crop_idx=0）
+        img = images[idx, 0]  # [c, h, w]
     else:
-        raise ValueError(f"不支持的图像维度: {images.shape}")
+        # 4维数据：[bs, c, h, w]
+        img = images[idx]  # [c, h, w]
+    
+    # 转HWC格式
+    img = img.permute(1, 2, 0).numpy()  # [h, w, c]
+    
+    # 0-255归一化
+    img = (img - img.min()) / (img.max() - img.min()) * 255  # 确保值域正确映射
+    img = img.astype(np.uint8)
+    
+    # 灰度图像（三通道数值一致）转单通道
+    if is_gray and img.shape[-1] == 3:
+        img = img[..., 0]  # 取任意一个通道即可（三通道数值一致）
+    
+    return img
+
+def check_gray_image(img_tensor, tolerance=1e-3):
+    """
+    检查图像是否为灰度图（通过判断三通道数值是否相似）
+    兼容：1通道灰度图、3通道灰度图（三通道数值一致）
+    Args:
+        img_tensor: 单张图像张量（CHW格式: [c, h, w]）
+        tolerance: 数值相似度容差（默认1e-3，可调整）
+    Returns:
+        bool: 是否为灰度图像
+    """
+    c = img_tensor.shape[0]
+    if c == 1:
+        # 1通道直接判定为灰度图
+        return True
+    elif c == 3:
+        # 3通道：判断三个通道的数值是否在容差范围内一致
+        channel1 = img_tensor[0].cpu().numpy()
+        channel2 = img_tensor[1].cpu().numpy()
+        channel3 = img_tensor[2].cpu().numpy()
+        
+        # 计算通道间的最大差异
+        max_diff12 = np.max(np.abs(channel1 - channel2))
+        max_diff13 = np.max(np.abs(channel1 - channel3))
+        
+        return max_diff12 < tolerance and max_diff13 < tolerance
+    else:
+        # 其他通道数暂不支持，默认判定为彩色图
+        return False
+
+def apply_corruption_to_crop(crop_img, corruption_func, severity, is_gray):
+    """
+    对单个裁剪块应用扰动（保持灰度/彩色一致性）
+    Args:
+        crop_img: 单个裁剪块张量 [c, h, w]（CHW格式）
+        corruption_func: 扰动函数
+        severity: 扰动强度
+        is_gray: 是否为灰度图像（三通道数值一致）
+    Returns:
+        扰动后的裁剪块张量 [c, h, w]（CHW格式）
+    """
+    # 转HWC格式并归一化到0-255 uint8
+    crop_hwc = crop_img.permute(1, 2, 0).numpy()  # [h, w, c]
+    crop_hwc = (crop_hwc - crop_hwc.min()) / (crop_hwc.max() - crop_hwc.min()) * 255
+    crop_hwc = crop_hwc.astype(np.uint8)
+    
+    # 灰度图像处理（转为单通道避免扰动函数生成彩色）
+    if is_gray:
+        if crop_hwc.shape[-1] == 3:
+            # 3通道灰度图 → 单通道
+            crop_hwc = crop_hwc[..., 0]  # 取第一个通道（三通道数值一致）
+    
+    # 应用扰动
+    corrupted_hwc = corruption_func(crop_hwc, severity=severity)
+    
+    # 恢复通道数（灰度→保持单通道或转为3通道，彩色保持3通道）
+    if is_gray:
+        if corrupted_hwc.ndim == 2:
+            # 单通道 → 恢复为原始通道数（1或3）
+            if crop_img.shape[0] == 1:
+                corrupted_hwc = np.expand_dims(corrupted_hwc, axis=-1)  # [h, w, 1]
+            else:  # 原始为3通道灰度图
+                corrupted_hwc = np.repeat(np.expand_dims(corrupted_hwc, axis=-1), 3, axis=-1)  # [h, w, 3]
+        elif corrupted_hwc.ndim == 3 and corrupted_hwc.shape[-1] == 3:
+            # 部分扰动函数可能输出3通道，转灰度（取均值或任意通道）
+            corrupted_hwc = np.expand_dims(np.mean(corrupted_hwc, axis=-1), axis=-1).astype(np.uint8)
+            if crop_img.shape[0] == 3:
+                corrupted_hwc = np.repeat(corrupted_hwc, 3, axis=-1)  # 恢复3通道
+    
+    # 归一化到0-1并转CHW格式
+    corrupted_chw = torch.from_numpy(corrupted_hwc / 255.0).permute(2, 0, 1).float()
+    
+    return corrupted_chw
 
 def evaluate_robustness_corruptions(test_loader, estimator, metrics):
     ResultSender.send_log("进度", "扰动攻击评测开始")
@@ -394,36 +499,44 @@ def evaluate_robustness_corruptions(test_loader, estimator, metrics):
                     bs = images.shape[0]  # 无论4维还是5维，批次大小都是第一维
 
                     for i in range(bs):
-                        # 提取原始图像（用于扰动和可视化）
-                        original_img = get_original_image(images, i).astype(np.uint8)
-                        
-                        # 应用扰动（输入必须是uint8格式的HWC图像）
-                        corrupted_img = corruption_function(original_img, severity=severity)
-                        
-                        # 转换为模型输入格式：HWC → CHW，0-1归一化，添加批次维度
-                        if isinstance(corrupted_img, np.ndarray):
-                            # 处理numpy数组格式
-                            corrupted_tensor = torch.from_numpy(corrupted_img / 255.0).permute(2, 0, 1).float()
-                        else:
-                            # 处理PIL图像格式
-                            corrupted_tensor = transforms.ToTensor()(corrupted_img)
-                        
-                        # 根据输入数据类型生成对应格式的扰动数据
+                        true_label = labels[i].item()
+                        original_input = images[i:i+1].numpy()  # 原始输入（保持4D/5D格式）
+                        pred_clean = process_predictions(original_input, estimator)
+                        clean_pred_label = np.argmax(pred_clean, axis=1)[0]
+
+                        # 检测当前样本是否为灰度图（取第一个裁剪块进行检测）
                         if len(images.shape) == 5:
-                            # 5维数据：生成10折裁剪，保持格式为(1, 10, c, h, w)
-                            ncrops = images.shape[1]
-                            # TenCrop返回tuple，需转换为tensor并添加批次维度
-                            corrupted_crops = transforms.TenCrop(size=original_img.shape[:2])(corrupted_tensor)
-                            corrupted_crops = torch.stack(corrupted_crops).unsqueeze(0)  # (1, 10, c, h, w)
-                            model_input = corrupted_crops.numpy()
+                            sample_img = images[i, 0]  # [c, h, w]（第一个裁剪块）
                         else:
-                            # 4维数据：保持格式为(1, c, h, w)
-                            model_input = corrupted_tensor.unsqueeze(0).numpy()
-                        
-                        # 模型预测
+                            sample_img = images[i]  # [c, h, w]
+                        is_gray = check_gray_image(sample_img)
+
+                        # 生成扰动输入（关键修复：复用原始裁剪块，固定取第一个裁剪图用于扰动）
+                        if len(images.shape) == 5:
+                            # 5D数据：[bs, ncrops, c, h, w] → 对每个裁剪块单独扰动（保持裁剪位置一致）
+                            ncrops = images.shape[1]
+                            corrupted_crops = []
+                            for crop_idx in range(ncrops):
+                                # 提取单个裁剪块
+                                crop_img = images[i, crop_idx]  # [c, h, w]
+                                # 应用扰动（保持灰度/彩色一致性）
+                                corrupted_crop = apply_corruption_to_crop(
+                                    crop_img, corruption_function, severity, is_gray
+                                )
+                                corrupted_crops.append(corrupted_crop)
+                            # 重组为5D张量：[1, ncrops, c, h, w]
+                            corrupted_tensor = torch.stack(corrupted_crops).unsqueeze(0)
+                        else:
+                            # 4D数据：[bs, c, h, w] → 直接扰动
+                            img = images[i]  # [c, h, w]
+                            corrupted_tensor = apply_corruption_to_crop(
+                                img, corruption_function, severity, is_gray
+                            ).unsqueeze(0)  # [1, c, h, w]
+
+                        # 转numpy格式用于预测
+                        model_input = corrupted_tensor.numpy()
                         pred = process_predictions(model_input, estimator)
                         pred_label = np.argmax(pred, axis=1)[0]
-                        true_label = labels[i].item()
 
                         # 统计错误数
                         if pred_label != true_label:
@@ -432,15 +545,23 @@ def evaluate_robustness_corruptions(test_loader, estimator, metrics):
 
                         # 保存对比图像（仅当原始预测正确且扰动后预测错误时）
                         if should_save_images and saved_images_count < max_saved_images:
-                            # 原始图像的预测（使用完整输入格式）
-                            original_input = images[i:i+1].numpy()  # 保持原始维度（1, ncrops, c, h, w）或（1, c, h, w）
-                            pred_clean = process_predictions(original_input, estimator)
-                            clean_pred_label = np.argmax(pred_clean, axis=1)[0]
-                            
                             if clean_pred_label == true_label and pred_label != true_label:
+                                # 提取可视化用的原始图像和扰动图像（均取第一个裁剪块）
+                                clean_img_vis = get_original_image(images, i, is_gray)
+                                # 扰动图像取第一个裁剪块
+                                if len(corrupted_tensor.shape) == 5:
+                                    corrupted_img_vis = corrupted_tensor[0, 0].permute(1, 2, 0).numpy()
+                                else:
+                                    corrupted_img_vis = corrupted_tensor[0].permute(1, 2, 0).numpy()
+                                # 转0-255 uint8
+                                corrupted_img_vis = (corrupted_img_vis * 255).astype(np.uint8)
+                                # 灰度图像处理（三通道→单通道）
+                                if is_gray and corrupted_img_vis.ndim == 3 and corrupted_img_vis.shape[-1] == 3:
+                                    corrupted_img_vis = corrupted_img_vis[..., 0]
+
                                 save_corruption_comparison(
-                                    original_img,  # 原始图像（HWC, 0-255）
-                                    corrupted_img,  # 扰动图像（HWC, 0-255）
+                                    clean_img_vis,
+                                    corrupted_img_vis,
                                     true_label,
                                     clean_pred_label,
                                     pred_label,
