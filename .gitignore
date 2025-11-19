@@ -23,3 +23,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Model weight files
+model/weight/
+*.pth
+*.pt
