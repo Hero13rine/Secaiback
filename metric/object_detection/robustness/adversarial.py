@@ -13,6 +13,18 @@ PredictionLike = Union[DetectionSample, Mapping[str, Sequence[float]]]
 GroundTruthLike = Union[DetectionSample, Mapping[str, Sequence[float]]]
 
 
+# 允许的指标配置（在 evaluate_robustness 中共用）
+SCALAR_ROBUSTNESS_METRICS = frozenset({"map_drop_rate", "miss_rate", "false_detection_rate"})
+PER_CLASS_METRIC_NAME = "per_class_map"
+PER_CLASS_METRIC_ALIASES = frozenset(
+    {"per_class_map", "per_class_ap", "per_class_clean_map", "per_class_adversarial_map"}
+)
+ALL_METRIC_ALIASES = {
+    **{metric: metric for metric in SCALAR_ROBUSTNESS_METRICS},
+    **{alias: PER_CLASS_METRIC_NAME for alias in PER_CLASS_METRIC_ALIASES},
+}
+
+
 @dataclass(frozen=True)
 class RobustnessMetrics:
     """目标检测鲁棒性指标容器."""
@@ -177,6 +189,10 @@ class AdversarialRobustnessEvaluator:
             "false_detection_rate": false_detection_rate,
         }
 
+        include_per_class_metrics = (
+            metric_filter is None or PER_CLASS_METRIC_NAME in metric_filter
+        )
+
         if metric_filter:
             metric_values = {
                 key: metric_values[key]
@@ -184,12 +200,15 @@ class AdversarialRobustnessEvaluator:
                 if key in metric_filter
             }
 
+        per_class_clean = baseline_per_class if include_per_class_metrics else None
+        per_class_adv = adversarial_per_class if include_per_class_metrics else None
+
         return RobustnessMetrics(
             map_drop_rate=metric_values.get("map_drop_rate", 0.0),
             miss_rate=metric_values.get("miss_rate", 0.0),
             false_detection_rate=metric_values.get("false_detection_rate", 0.0),
-            per_class_clean_map=baseline_per_class,
-            per_class_adversarial_map=adversarial_per_class,
+            per_class_clean_map=per_class_clean or {},
+            per_class_adversarial_map=per_class_adv or {},
             clean_map=baseline_map,
             adversarial_map=adversarial_map,
             clean_miss_rate=clean_miss_rate,
@@ -251,8 +270,9 @@ class AdversarialRobustnessEvaluator:
             if not isinstance(name, str):
                 continue
             normalized = name.strip().lower()
-            if normalized in {"map_drop_rate", "miss_rate", "false_detection_rate"}:
-                filtered[normalized] = None
+            canonical = ALL_METRIC_ALIASES.get(normalized)
+            if canonical:
+                filtered[canonical] = None
         return filtered or None
 
     @staticmethod
@@ -281,4 +301,7 @@ __all__ = [
     "AdversarialRobustnessEvaluator",
     "PredictionLike",
     "RobustnessMetrics",
+    "ALL_METRIC_ALIASES",
+    "PER_CLASS_METRIC_NAME",
+    "SCALAR_ROBUSTNESS_METRICS",
 ]

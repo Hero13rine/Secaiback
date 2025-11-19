@@ -16,6 +16,7 @@ DEFAULT_CORRUPTION_PARAMETER_CONFIG = Path("config/attack/corruption.yaml")
 from .adversarial import (
     AdversarialRobustnessEvaluator,
     AttackEvaluationResult,
+    ALL_METRIC_ALIASES,
     PredictionLike,
     RobustnessMetrics,
 )
@@ -842,16 +843,17 @@ def _extract_metric_list(
             if not isinstance(item, str):
                 continue
             normalized_name = item.strip().lower()
-            # 只保留支持的指标名称
-            if normalized_name in {"map_drop_rate", "miss_rate", "false_detection_rate"}:
-                normalized.append(normalized_name)
+            canonical = ALL_METRIC_ALIASES.get(normalized_name)
+            if canonical:
+                normalized.append(canonical)
         return tuple(normalized) if normalized else fallback
 
     # 处理字符串类型
     if isinstance(metrics_payload, str):
         normalized_name = metrics_payload.strip().lower()
-        if normalized_name in {"map_drop_rate", "miss_rate", "false_detection_rate"}:
-            return (normalized_name,)
+        canonical = ALL_METRIC_ALIASES.get(normalized_name)
+        if canonical:
+            return (canonical,)
 
     return fallback
 
