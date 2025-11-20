@@ -20,7 +20,7 @@ import torch
 import yaml
 
 from attack import AttackFactory
-from utils.sender import ResultSender
+from utils.SecAISender import ResultSender
 
 DEFAULT_CORRUPTION_PARAMETER_CONFIG = Path("config/attack/corruption.yaml")
 
