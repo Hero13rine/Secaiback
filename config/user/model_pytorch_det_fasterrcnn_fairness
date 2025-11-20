@@ -2,7 +2,7 @@
 model:
   instantiation:
     model_path: "/wkm/secai/secai-common/tests/fasterrcnn/model.py"
-    weight_path: "/wkm/secai/secai-common/tests/fasterrcnn/dior_clean_best.pt"
+    weight_path: "/wkm/secai/secai-common/tests/fasterrcnn/faterrcnn_dior.pt"
     model_name: "TorchvisionDetector"
     parameters:
       "num_classes": 20
