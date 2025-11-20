@@ -150,6 +150,7 @@ def _publish_robustness_results(
     if payload:
         ResultSender.send_result("robustness", payload)
         ResultSender.send_log("进度", "鲁棒性评测结果已发送")
+        ResultSender.send_status("成功")
     else:
         message = "鲁棒性配置未启用攻击或扰动评估"
         ResultSender.send_log("提示", message)
