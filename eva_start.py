@@ -11,6 +11,9 @@ from metric.classification.safety.membershipinference.evaluate_mia import evalua
 from utils.SecAISender import ResultSender
 from metric.classification.robustness.evaluate_robustness import evaluation_robustness
 from metric.classification.fairness.fairness_metrics import calculate_fairness_metrics
+from metric.object_detection.robustness import (
+    evaluation_robustness as detection_evaluation_robustness,
+)
 
 # 将目标路径添加到系统路径
 sys.path.append('/app/userData/modelData/')
@@ -74,14 +77,21 @@ def main():
     # 6.根据传入的评测类型进行评测
     if task == "detection":
         from metric.object_detection.basic.basic import cal_basic
-        from metric.object_detection.fairness import evaluate_fairness_detection as calculate_fairness_metrics
     else:
         from metric.classification.basic.basic import cal_basic
-        from metric.classification.fairness.fairness_metrics import calculate_fairness_metrics
     if evaluation_type == "basic":
         cal_basic(estimator, test_loader, evaluation_config["basic"])
     elif evaluation_type == "robustness":
-        evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
+        if task == "detection":
+            detection_evaluation_robustness(
+                estimator=estimator,
+                test_data=test_loader,
+                config=evaluation_config,
+                batch_size=64,
+            )
+        else:
+            from metric.classification.robustness.evaluate_robustness import evaluation_robustness
+            evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
     elif evaluation_type == "interpretability":
         GradientShap(model, test_loader)
     elif evaluation_type == "generalization":

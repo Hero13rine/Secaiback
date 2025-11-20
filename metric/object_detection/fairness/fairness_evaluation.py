@@ -19,7 +19,7 @@ from typing import Dict, List, Any, Callable
 from pathlib import Path
 from collections import defaultdict
 
-from utils.sender import RemoteResultSender as ResultSender
+from utils.SecAISender import ResultSender
 # from utils.sender import ConsoleResultSender as ResultSender # 本地调试时使用
 
 
