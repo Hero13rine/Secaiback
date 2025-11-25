@@ -1,6 +1,7 @@
 """Membership inference attack pipeline for object detection models."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -16,7 +17,6 @@ from torchvision.transforms import functional as TF
 from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN_ResNet50_FPN_Weights
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import box_iou
-from estimator import EstimatorFactory
 from model import load_model
 from method import load_config
 from utils.SecAISender import ResultSender
@@ -48,7 +48,6 @@ class MIADetectionConfig:
     model_path: Path
     model_name: str
     model_parameters: Mapping[str, Any]
-    estimator_config: Dict[str, Any]
     img_size: int = 640
     num_classes: int = 20
     canvas_size: int = 300
@@ -83,7 +82,6 @@ class MIADetectionConfig:
         model_section: Dict[str, Any] = user_data.get("model", {})
         dataset_section: Dict[str, Any] = model_section.get("dataset", {})
         instantiation: Dict[str, Any] = model_section.get("instantiation", {})
-        estimator_config: Dict[str, Any] = model_section.get("estimator", {})
 
         target_path = Path(instantiation.get("weight_path", "fasterrcnn_dior.pt"))
         shadow_path = Path(params.get("shadow_model", "runs/shadow_train/exp/best.pt"))
@@ -102,7 +100,6 @@ class MIADetectionConfig:
             shadow_model_path=Path(params.get("shadow_model_path", instantiation.get("model_path", ""))),
             shadow_model_name=params.get("shadow_model_name", instantiation.get("model_name", "")),
             shadow_model_parameters=params.get("shadow_model_parameters", instantiation.get("parameters", {})),
-            estimator_config=estimator_config,
             img_size=params.get("img_size", 640),
             num_classes=params.get("num_classes", 20),
             canvas_size=params.get("canvas_size", 300),
@@ -130,9 +127,7 @@ class MIADetectionConfig:
 
     @property
     def torch_device(self) -> torch.device:
-        estimator_params = self.estimator_config.get("parameters", {}) if self.estimator_config else {}
-        estimator_device = estimator_params.get("device_type") or estimator_params.get("device")
-        requested = self.device if self.device != "auto" else estimator_device
+        requested = self.device
         if requested == "cpu" or not torch.cuda.is_available():
             return torch.device("cpu")
         if requested in {None, "auto", "gpu", "cuda"}:
@@ -206,39 +201,71 @@ class AttackModel(nn.Module):
         return self.model(x)
 
 
-def build_estimator(model: torch.nn.Module, loss: Any, optimizer: Any, cfg: MIADetectionConfig) -> Any:
-    """Wrap a user model with ART estimator using provided components."""
+def _shadow_metadata_path(weight_path: Path) -> Path:
+    """Return the sidecar metadata path for a given weight file."""
 
-    return EstimatorFactory.create(
-        model=model,
-        loss=loss,
-        optimizer=optimizer,
-        config=cfg.estimator_config,
-    )
+    return weight_path.with_suffix(weight_path.suffix + ".json")
 
 
-def _load_estimator_from_weights(
+def _save_shadow_metadata(
     weight_path: Path,
     model_path: Path,
     model_name: str,
     model_parameters: Mapping[str, Any],
-    cfg: MIADetectionConfig,
-    fallback: Any,
-) -> Any:
-    """Load a dedicated estimator instance when weight file is available.
+) -> None:
+    """Persist shadow model metadata to simplify reloading in later runs."""
 
-    If the configured weight file does not exist, the provided ``fallback``
-    estimator is returned to keep backward compatibility with environments
-    that only supply a single initialized model.
-    """
+    meta_path = _shadow_metadata_path(weight_path)
+    meta = {
+        "model_path": str(model_path),
+        "model_name": model_name,
+        "model_parameters": model_parameters,
+    }
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+
+def _load_shadow_metadata(weight_path: Path) -> Tuple[Path, str, Mapping[str, Any]] | None:
+    """Load sidecar metadata for a shadow weight file if available."""
+
+    meta_path = _shadow_metadata_path(weight_path)
+    if not meta_path.exists():
+        return None
+
+    try:
+        data = json.loads(meta_path.read_text())
+    except json.JSONDecodeError:
+        LOGGER.warning("影子模型元数据文件损坏，忽略：%s", meta_path)
+        return None
+
+    model_path = Path(data.get("model_path", ""))
+    model_name = str(data.get("model_name", ""))
+    model_params = data.get("model_parameters", {})
+    if not model_path or not model_name:
+        return None
+
+    return model_path, model_name, model_params
+
+
+def _load_model_from_weights(
+    weight_path: Path,
+    model_path: Path,
+    model_name: str,
+    model_parameters: Mapping[str, Any],
+    device: torch.device,
+) -> torch.nn.Module:
+    """Load a detection model using the provided definition and weights."""
+
+    if not model_path or not model_name:
+        raise ValueError("缺少模型定义路径或名称，无法加载模型")
 
     if not weight_path or not weight_path.exists():
-        LOGGER.warning("Configured weight %s 不存在，回退到已有估计器", weight_path)
-        return fallback
+        raise FileNotFoundError(f"模型权重不存在: {weight_path}")
 
     model = load_model(model_path, model_name, str(weight_path), model_parameters)
+    model.to(device)
     model.eval()
-    return build_estimator(model, loss=None, optimizer=None, cfg=cfg)
+    return model
 
 
 def _train_shadow_model(
@@ -272,6 +299,16 @@ def _train_shadow_model(
 
     cfg.shadow_weight.parent.mkdir(parents=True, exist_ok=True)
     train_shadow_finetune(_ShadowCfg())
+
+    cfg.shadow_model_path = Path(__file__).with_name("shadow_model_def.py")
+    cfg.shadow_model_name = "ShadowFasterRCNN"
+    cfg.shadow_model_parameters = {"num_classes": cfg.num_classes}
+    _save_shadow_metadata(
+        cfg.shadow_weight,
+        cfg.shadow_model_path,
+        cfg.shadow_model_name,
+        cfg.shadow_model_parameters,
+    )
     return cfg.shadow_weight
 
 
@@ -586,11 +623,11 @@ def _train_attack_model(config: MIADetectionConfig, member: np.ndarray, non_memb
 
 
 def evaluation_mia_detection(
-    estimator: Any,
     train_loader: Any,
     val_loader: Any,
     test_loader: Any,
     safety_config: Mapping[str, Any],
+    target_model: Any | None = None,
 ) -> Dict[str, Any]:
     """按照 ``eval_start`` 示例运行目标检测的成员推理攻击。"""
 
@@ -603,6 +640,10 @@ def evaluation_mia_detection(
     attack_cfg = load_config(attack_cfg_path) if attack_cfg_path else {}
     attack_params = attack_cfg.get("parameters", {}).get("optional", {}) if isinstance(attack_cfg, dict) else {}
 
+    model_path = attack_params.get("model_path") or safety_config.get("model_path", "")
+    model_name = str(attack_params.get("model_name") or safety_config.get("model_name", ""))
+    model_parameters = attack_params.get("model_parameters") or safety_config.get("model_parameters", {})
+
     cfg = MIADetectionConfig(
         target_weight=Path(attack_params.get("target_weight", "target.pt")),
         shadow_weight=Path(attack_params.get("shadow_model", "runs/shadow_train/exp/best.pt")),
@@ -610,13 +651,12 @@ def evaluation_mia_detection(
         train_dir=Path(getattr(getattr(train_loader, "dataset", None), "root", "data/dataset/dior/train")),
         val_dir=Path(getattr(getattr(val_loader, "dataset", None), "root", "data/dataset/dior/val")),
         test_dir=Path(getattr(getattr(test_loader, "dataset", None), "root", "data/dataset/dior/test")),
-        model_path=Path(attack_params.get("model_path", "")),
-        model_name=str(attack_params.get("model_name", "")),
-        model_parameters=attack_params.get("model_parameters", {}),
-        shadow_model_path=Path(attack_params.get("shadow_model_path", attack_params.get("model_path", ""))),
-        shadow_model_name=str(attack_params.get("shadow_model_name", attack_params.get("model_name", ""))),
-        shadow_model_parameters=attack_params.get("shadow_model_parameters", attack_params.get("model_parameters", {})),
-        estimator_config=getattr(estimator, "config", {}),
+        model_path=Path(model_path),
+        model_name=model_name,
+        model_parameters=model_parameters,
+        shadow_model_path=Path(attack_params.get("shadow_model_path", model_path)),
+        shadow_model_name=str(attack_params.get("shadow_model_name", model_name)),
+        shadow_model_parameters=attack_params.get("shadow_model_parameters", model_parameters),
         img_size=attack_params.get("img_size", 640),
         num_classes=attack_params.get("num_classes", 20),
         canvas_size=attack_params.get("canvas_size", 300),
@@ -649,14 +689,19 @@ def evaluation_mia_detection(
     if not shadow_weight.exists():
         _train_shadow_model(cfg, train_loader, val_loader, test_loader)
 
+    if (not cfg.shadow_model_path or not cfg.shadow_model_name) and shadow_weight.exists():
+        meta = _load_shadow_metadata(shadow_weight)
+        if meta:
+            cfg.shadow_model_path, cfg.shadow_model_name, cfg.shadow_model_parameters = meta
+
     shadow_model_path = cfg.shadow_model_path or cfg.model_path
     shadow_model_name = cfg.shadow_model_name or cfg.model_name
     shadow_model_parameters = cfg.shadow_model_parameters or cfg.model_parameters
-    shadow_estimator = _load_estimator_from_weights(
-        shadow_weight, shadow_model_path, shadow_model_name, shadow_model_parameters, cfg, estimator
+    shadow_model = _load_model_from_weights(
+        shadow_weight, shadow_model_path, shadow_model_name, shadow_model_parameters, device
     )
     member_samples = generate_pointsets(
-        shadow_estimator,
+        shadow_model,
         test_images,
         cfg.img_size,
         device,
@@ -666,7 +711,7 @@ def evaluation_mia_detection(
         max_samples=cfg.member_samples,
     )
     non_member_samples = generate_pointsets(
-        shadow_estimator,
+        shadow_model,
         val_images,
         cfg.img_size,
         device,
@@ -682,11 +727,11 @@ def evaluation_mia_detection(
     attack_model, metrics = _train_attack_model(cfg, member_canvas, non_member_canvas)
 
     ResultSender.send_log("进度", "在目标模型上提取评估样本")
-    target_estimator = _load_estimator_from_weights(
-        cfg.target_weight, cfg.model_path, cfg.model_name, cfg.model_parameters, cfg, estimator
+    target_model = target_model or _load_model_from_weights(
+        cfg.target_weight, cfg.model_path, cfg.model_name, cfg.model_parameters, device
     )
     target_member = generate_pointsets(
-        target_estimator,
+        target_model,
         train_images,
         cfg.img_size,
         device,
@@ -696,7 +741,7 @@ def evaluation_mia_detection(
         max_samples=cfg.member_samples,
     )
     target_non_member = generate_pointsets(
-        target_estimator,
+        target_model,
         test_images,
         cfg.img_size,
         device,
@@ -737,5 +782,4 @@ __all__ = [
     "evaluation_mia_detection",
     "MIADetectionConfig",
     "AttackModel",
-    "build_estimator",
 ]
