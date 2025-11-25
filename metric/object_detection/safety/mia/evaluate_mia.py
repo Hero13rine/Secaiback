@@ -14,6 +14,7 @@ import torch.optim as optim
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score
 
 from estimator import EstimatorFactory
+from model import load_model
 from method import load_config
 from utils.SecAISender import ResultSender
 
@@ -199,6 +200,23 @@ def build_estimator(model: torch.nn.Module, loss: Any, optimizer: Any, cfg: MIAD
     )
 
 
+def _load_estimator_from_weights(weight_path: Path, cfg: MIADetectionConfig, fallback: Any) -> Any:
+    """Load a dedicated estimator instance when weight file is available.
+
+    If the configured weight file does not exist, the provided ``fallback``
+    estimator is returned to keep backward compatibility with environments
+    that only supply a single initialized model.
+    """
+
+    if not weight_path or not weight_path.exists():
+        LOGGER.warning("Configured weight %s 不存在，回退到已有估计器", weight_path)
+        return fallback
+
+    model = load_model(cfg.model_path, cfg.model_name, str(weight_path), cfg.model_parameters)
+    model.eval()
+    return build_estimator(model, loss=None, optimizer=None, cfg=cfg)
+
+
 def _extract_image_paths(loader: Any) -> Sequence[Path]:
     """Extract image paths from a dataloader with validation."""
 
@@ -356,6 +374,7 @@ def evaluation_mia_detection(
     test_images = _extract_image_paths(test_loader)
 
     ResultSender.send_log("进度", "生成影子模型特征")
+    # 影子模型在本函数内部定义/训练，直接复用传入的 estimator，避免权重加载逻辑
     shadow_estimator = estimator
     member_samples = generate_pointsets(
         shadow_estimator,
@@ -384,7 +403,7 @@ def evaluation_mia_detection(
     attack_model, metrics = _train_attack_model(cfg, member_canvas, non_member_canvas)
 
     ResultSender.send_log("进度", "在目标模型上提取评估样本")
-    target_estimator = estimator
+    target_estimator = _load_estimator_from_weights(cfg.target_weight, cfg, estimator)
     target_member = generate_pointsets(
         target_estimator,
         train_images,
