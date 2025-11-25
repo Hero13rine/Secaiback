@@ -12,7 +12,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score
-
+from torchvision.transforms import functional as TF
+from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN_ResNet50_FPN_Weights
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+from torchvision.ops import box_iou
 from estimator import EstimatorFactory
 from model import load_model
 from method import load_config
@@ -35,9 +38,9 @@ class MIADetectionConfig:
 
     target_weight: Path
     shadow_weight: Path
-    shadow_model_path: Path | None = None
-    shadow_model_name: str | None = None
-    shadow_model_parameters: Mapping[str, Any] | None = None
+    shadow_model_path: Path
+    shadow_model_name: str
+    shadow_model_parameters: Mapping[str, Any]
     attack_model_out: Path
     train_dir: Path
     val_dir: Path
@@ -65,6 +68,10 @@ class MIADetectionConfig:
     member_samples: int = 3000
     nonmember_samples: int = 3000
     device: str = "auto"
+    shadow_epochs: int = 5
+    shadow_batch_size: int = 4
+    shadow_lr: float = 1e-3
+    shadow_weight_decay: float = 1e-4
 
     @classmethod
     def load(cls, attack_cfg: Path, user_cfg: Path) -> "MIADetectionConfig":
@@ -115,6 +122,10 @@ class MIADetectionConfig:
             member_samples=params.get("member_samples", 3000),
             nonmember_samples=params.get("nonmember_samples", 3000),
             device=params.get("device", "auto"),
+            shadow_epochs=params.get("shadow_epochs", 5),
+            shadow_batch_size=params.get("shadow_batch_size", 4),
+            shadow_lr=params.get("shadow_lr", 1e-3),
+            shadow_weight_decay=params.get("shadow_weight_decay", 1e-4),
         )
 
     @property
@@ -230,6 +241,41 @@ def _load_estimator_from_weights(
     return build_estimator(model, loss=None, optimizer=None, cfg=cfg)
 
 
+def _train_shadow_model(
+    cfg: MIADetectionConfig,
+    train_loader: Any,
+    val_loader: Any,
+    test_loader: Any,
+) -> Path:
+    """Train a shadow model when weights are not provided.
+
+    The training follows the simplified flow from ``add/train_shadow.py``:
+    - shadow members come from the provided ``test_loader``
+    - shadow non-members come from ``val_loader``
+    """
+    LOGGER.info("未找到影子模型权重，开始训练影子模型：%s", cfg.shadow_weight)
+
+    # train_loader is kept for signature clarity with the main pipeline
+    # even though the simplified flow relies on test/val split for shadow data
+    _ = train_loader
+
+    class _ShadowCfg:
+        use_external_loaders = True
+        train_loader = test_loader
+        val_loader = val_loader
+        img_size = cfg.img_size
+        SHADOW_BATCH_SIZE = cfg.shadow_batch_size
+        SHADOW_EPOCHS = cfg.shadow_epochs
+        SHADOW_LR = cfg.shadow_lr
+        weight_decay = cfg.shadow_weight_decay
+        SHADOW_MODEL_DIR = str(cfg.shadow_weight)
+        num_classes = cfg.num_classes
+
+    cfg.shadow_weight.parent.mkdir(parents=True, exist_ok=True)
+    train_shadow_finetune(_ShadowCfg())
+    return cfg.shadow_weight
+
+
 def _extract_image_paths(loader: Any) -> Sequence[Path]:
     """Extract image paths from a dataloader with validation."""
 
@@ -257,6 +303,117 @@ def _prepare_attack_dataset(
         global_normalize=True,
     )
     return canvases, labels
+
+
+# ---------------------------
+# Train Shadow Model
+# ---------------------------
+def train_shadow_finetune(cfg):
+    """
+    Train shadow model using the new simplified MIA flow:
+    - Training data: TEST set (becomes shadow model's member samples)
+    - Validation data: VAL set (for monitoring training progress)
+
+    The shadow model is trained on different data than the target model,
+    which allows it to learn similar patterns for membership inference.
+    """
+    device = torch.device(f"cuda:{getattr(cfg, 'gpu_id', 0)}" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    img_size = getattr(cfg, 'img_size', 640)
+    batch_size = getattr(cfg, 'SHADOW_BATCH_SIZE', getattr(cfg, 'batch_size', 4))
+    workers = getattr(cfg, 'workers', 0)
+    epochs = getattr(cfg, 'SHADOW_EPOCHS', getattr(cfg, 'EPOCHS', 50))
+    lr = getattr(cfg, 'SHADOW_LR', 0.001)
+    weight_decay = getattr(cfg, 'weight_decay', 1e-4)
+    save_model = getattr(cfg, 'SAVE_MODEL', True)
+    score_thresh = getattr(cfg, 'VAL_SCORE_THRESH', 0.5)
+
+    print(f"\n{'='*60}")
+    print("Shadow Model Training Configuration (Simplified MIA Flow)")
+    print(f"{'='*60}")
+
+    # Check if external dataloaders are provided
+    use_external_loaders = getattr(cfg, 'use_external_loaders', False)
+
+    if use_external_loaders:
+        print("Using externally provided DataLoaders from pipeline")
+        train_loader = cfg.train_loader
+        val_loader = cfg.val_loader
+        # Estimate dataset sizes from dataloaders
+        train_size = len(train_loader.dataset) if hasattr(train_loader.dataset, '__len__') else 'unknown'
+        val_size = len(val_loader.dataset) if hasattr(val_loader.dataset, '__len__') else 'unknown'
+        print(f"Train samples: {train_size}, Val samples: {val_size}")
+    else:
+        print("Loading datasets using load_dataset module")
+        print(f"{'='*60}\n")
+
+        # Load data using load_dataset module (the ONLY data source)
+        from load_dataset import load_data_mia
+
+        # For shadow training: we need TEST as training, VAL as validation
+        _, val_loader, test_loader = load_data_mia(
+            batch_size=batch_size,
+            num_workers=workers,
+            augment_train=True
+        )
+
+        train_loader = test_loader  # Shadow trains on TEST set
+        # val_loader already correct
+
+        train_size = len(train_loader.dataset) if hasattr(train_loader.dataset, '__len__') else 'unknown'
+        val_size = len(val_loader.dataset) if hasattr(val_loader.dataset, '__len__') else 'unknown'
+        print(f"Train samples (TEST set): {train_size}, Val samples (VAL set): {val_size}")
+
+    print(f"{'='*60}\n")
+
+    # Always use pretrained weights for shadow model (official FasterRCNN pretrained on COCO)
+    use_pretrained = getattr(cfg, 'SHADOW_USE_PRETRAINED', True)
+    print(f"Loading Faster R-CNN with official pretrained weights (pretrained={use_pretrained})...")
+    if use_pretrained:
+        model = fasterrcnn_resnet50_fpn(weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT)
+        in_features = model.roi_heads.box_predictor.cls_score.in_features
+        model.roi_heads.box_predictor = FastRCNNPredictor(in_features, getattr(cfg, 'num_classes', 20) + 1)
+    else:
+        model = fasterrcnn_resnet50_fpn(weights=None, num_classes=getattr(cfg, 'num_classes', 20) + 1)
+    model.to(device)
+
+    params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.SGD(params, lr=lr, momentum=0.9, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+
+    best_path = getattr(cfg, 'SHADOW_MODEL_DIR', 'runs/shadow_train/exp/best.pt')
+    os.makedirs(os.path.dirname(best_path) or '.', exist_ok=True)
+    best_f1 = -1.0
+
+    for epoch in range(epochs):
+        model.train()
+        running_loss = 0.0
+        for images, targets in tqdm(train_loader, desc=f"Epoch [{epoch+1}/{epochs}]", ncols=120):
+            images = [img.to(device) for img in images]
+            targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+            loss_dict = model(images, targets)
+            losses = sum(loss for loss in loss_dict.values())
+            loss_value = losses.item()
+            optimizer.zero_grad()
+            losses.backward()
+            optimizer.step()
+            running_loss += loss_value
+        scheduler.step()
+        avg_loss = running_loss / len(train_loader)
+        print(f"📉 Epoch {epoch+1} Train Loss: {avg_loss:.4f}")
+
+        num_classes = getattr(cfg, 'num_classes', 20)
+        precision, recall, f1, mAP = evaluate(model, val_loader, device, iou_thresh=0.5, score_thresh=score_thresh, num_classes=num_classes)
+        if save_model and f1 > best_f1:
+            best_f1 = f1
+            torch.save(model.state_dict(), best_path)
+            print(f"🏆 New best model saved ({best_f1:.4f}, mAP={mAP:.4f})")
+
+    if save_model:
+        last_path = os.path.join(os.path.dirname(best_path), 'last.pt')
+        torch.save(model.state_dict(), last_path)
+        print(f"✅ Training finished. Last model saved to {last_path}")
 
 
 def _train_attack_model(config: MIADetectionConfig, member: np.ndarray, non_member: np.ndarray) -> Tuple[AttackModel, Dict[str, float]]:
@@ -389,12 +546,16 @@ def evaluation_mia_detection(
     val_images = _extract_image_paths(val_loader)
     test_images = _extract_image_paths(test_loader)
 
-    ResultSender.send_log("进度", "生成影子模型特征")
+    ResultSender.send_log("进度", "训练并使用影子模型生成特征")
+    shadow_weight = cfg.shadow_weight
+    if not shadow_weight.exists():
+        _train_shadow_model(cfg, train_loader, val_loader, test_loader)
+
     shadow_model_path = cfg.shadow_model_path or cfg.model_path
     shadow_model_name = cfg.shadow_model_name or cfg.model_name
     shadow_model_parameters = cfg.shadow_model_parameters or cfg.model_parameters
     shadow_estimator = _load_estimator_from_weights(
-        cfg.shadow_weight, shadow_model_path, shadow_model_name, shadow_model_parameters, cfg, estimator
+        shadow_weight, shadow_model_path, shadow_model_name, shadow_model_parameters, cfg, estimator
     )
     member_samples = generate_pointsets(
         shadow_estimator,
@@ -423,7 +584,9 @@ def evaluation_mia_detection(
     attack_model, metrics = _train_attack_model(cfg, member_canvas, non_member_canvas)
 
     ResultSender.send_log("进度", "在目标模型上提取评估样本")
-    target_estimator = estimator
+    target_estimator = _load_estimator_from_weights(
+        cfg.target_weight, cfg.model_path, cfg.model_name, cfg.model_parameters, cfg, estimator
+    )
     target_member = generate_pointsets(
         target_estimator,
         train_images,
