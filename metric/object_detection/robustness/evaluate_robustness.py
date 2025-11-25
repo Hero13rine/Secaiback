@@ -85,7 +85,7 @@ def load_robustness_config(config_path: Union[str, Path]) -> Dict[str, Any]:
         return yaml.safe_load(handle) or {}
 
 
-def _attack_result_summary(
+def _adversarial_result_summary(
         results: Mapping[str, AttackEvaluationResult]
 ) -> List[Mapping[str, Any]]:
     """将对抗攻击结果转换为可发送的简洁结构."""
@@ -93,14 +93,24 @@ def _attack_result_summary(
     summary: List[Mapping[str, Any]] = []
     for attack_name, result in results.items():
         metrics = result.metrics
-        summary.append(
-            {
-                "attack_name": attack_name,
-                "map_drop_rate": metrics.map_drop_rate,
-                "miss_rate": metrics.miss_rate,
-                "false_detection_rate": metrics.false_detection_rate,
-            }
-        )
+        attack_entry: Dict[str, Any] = {"attack": result.metadata.get("attack", attack_name)}
+        for key, value in result.metadata.items():
+            if key != "attack":
+                attack_entry[key] = value
+
+        attack_entry["metrics"] = {
+            "clean_map": metrics.clean_map,
+            "adversarial_map": metrics.adversarial_map,
+            "map_drop_rate": metrics.map_drop_rate,
+            "miss_rate": metrics.miss_rate,
+            "false_detection_rate": metrics.false_detection_rate,
+            "clean_miss_rate": metrics.clean_miss_rate,
+            "clean_false_detection_rate": metrics.clean_false_detection_rate,
+            "per_class_clean_map": metrics.per_class_clean_map,
+            "per_class_adversarial_map": metrics.per_class_adversarial_map,
+        }
+
+        summary.append(attack_entry)
     return summary
 
 
@@ -133,13 +143,14 @@ def _publish_robustness_results(
 
     payload: Dict[str, Any] = {}
     if adversarial_results:
-        payload["adversarial"] = _attack_result_summary(adversarial_results)
+        payload["adversarial"] = _adversarial_result_summary(adversarial_results)
     if corruption_results:
         payload["corruption"] = _corruption_result_summary(corruption_results)
 
     if payload:
         ResultSender.send_result("robustness", payload)
         ResultSender.send_log("进度", "鲁棒性评测结果已发送")
+        ResultSender.send_status("成功")
     else:
         message = "鲁棒性配置未启用攻击或扰动评估"
         ResultSender.send_log("提示", message)
