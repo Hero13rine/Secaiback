@@ -43,7 +43,16 @@ def main():
     safety_cfg.setdefault("model_path", model_instantiation_config.get("model_path", ""))
     safety_cfg.setdefault("model_name", model_instantiation_config.get("model_name", ""))
     safety_cfg.setdefault("model_parameters", model_instantiation_config.get("parameters", {}))
-    evaluation_mia_detection(train_loader, val_loader, test_loader, safety_cfg, target_model=model)
+    safety_cfg["attack_config"] = evaluation_config.get("attack_config")
+
+    evaluation_mia_detection(
+        train_loader,
+        val_loader,
+        test_loader,
+        safety_cfg,
+        target_model=model,
+        model_instantiation=model_instantiation_config,
+    )
 
     ResultSender.send_log("进度", "评测结束")
 
