@@ -20,6 +20,7 @@ from estimator import EstimatorFactory
 from model import load_model
 from method import load_config
 from utils.SecAISender import ResultSender
+from tqdm import tqdm
 
 from .miaUtils import (
     AttackDataset,
@@ -249,9 +250,8 @@ def _train_shadow_model(
 ) -> Path:
     """Train a shadow model when weights are not provided.
 
-    The training follows the simplified flow from ``add/train_shadow.py``:
-    - shadow members come from the provided ``test_loader``
-    - shadow non-members come from ``val_loader``
+    The simplified flow uses ``test_loader`` data as shadow members and ``val_loader``
+    data as shadow non-members.
     """
     LOGGER.info("未找到影子模型权重，开始训练影子模型：%s", cfg.shadow_weight)
 
@@ -261,8 +261,8 @@ def _train_shadow_model(
 
     class _ShadowCfg:
         use_external_loaders = True
-        train_loader = test_loader
-        val_loader = val_loader
+        shadow_train_loader = test_loader
+        shadow_val_loader = val_loader
         img_size = cfg.img_size
         SHADOW_BATCH_SIZE = cfg.shadow_batch_size
         SHADOW_EPOCHS = cfg.shadow_epochs
@@ -306,6 +306,92 @@ def _prepare_attack_dataset(
 
 
 # ---------------------------
+# Evaluation helpers
+# ---------------------------
+def _match_detections(pred_boxes, gt_boxes, iou_thresh: float) -> Tuple[int, int, int]:
+    """Match predicted boxes to ground truth boxes using IoU."""
+
+    if len(pred_boxes) == 0 and len(gt_boxes) == 0:
+        return 0, 0, 0
+    if len(pred_boxes) == 0:
+        return 0, 0, len(gt_boxes)
+    if len(gt_boxes) == 0:
+        return 0, len(pred_boxes), 0
+
+    ious = box_iou(pred_boxes, gt_boxes)
+    matched_gt = torch.zeros(len(gt_boxes), dtype=torch.bool, device=ious.device)
+    matched_pred = torch.zeros(len(pred_boxes), dtype=torch.bool, device=ious.device)
+
+    for pred_idx in range(len(pred_boxes)):
+        gt_idx = torch.argmax(ious[pred_idx])
+        if ious[pred_idx, gt_idx] >= iou_thresh and not matched_gt[gt_idx]:
+            matched_gt[gt_idx] = True
+            matched_pred[pred_idx] = True
+
+    tp = int(matched_pred.sum().item())
+    fp = int((~matched_pred).sum().item())
+    fn = int((~matched_gt).sum().item())
+    return tp, fp, fn
+
+
+def evaluate_shadow(
+    model: nn.Module,
+    data_loader: Any,
+    device: torch.device,
+    iou_thresh: float = 0.5,
+    score_thresh: float = 0.5,
+    num_classes: int = 20,
+) -> Tuple[float, float, float, float]:
+    """Evaluate a detection model on the provided dataloader.
+
+    Computes precision, recall, F1, and a simplified mAP (per-class precision
+    averaged at a single IoU threshold).
+    """
+
+    model.eval()
+    tp = torch.zeros(num_classes, dtype=torch.float64, device=device)
+    fp = torch.zeros(num_classes, dtype=torch.float64, device=device)
+    fn = torch.zeros(num_classes, dtype=torch.float64, device=device)
+
+    with torch.no_grad():
+        for images, targets in data_loader:
+            images = [img.to(device) for img in images]
+            outputs = model(images)
+
+            for pred, target in zip(outputs, targets):
+                pred_boxes = pred.get("boxes", torch.empty(0, 4, device=device)).to(device)
+                pred_labels = pred.get("labels", torch.empty(0, dtype=torch.long, device=device)).to(device)
+                scores = pred.get("scores", torch.empty(0, device=device)).to(device)
+
+                gt_boxes = target.get("boxes", torch.empty(0, 4, device=device)).to(device)
+                gt_labels = target.get("labels", torch.empty(0, dtype=torch.long, device=device)).to(device)
+
+                for cls in range(1, num_classes + 1):
+                    cls_pred_mask = (pred_labels == cls) & (scores >= score_thresh)
+                    cls_gt_mask = gt_labels == cls
+                    cls_pred_boxes = pred_boxes[cls_pred_mask]
+                    cls_gt_boxes = gt_boxes[cls_gt_mask]
+
+                    cls_tp, cls_fp, cls_fn = _match_detections(cls_pred_boxes, cls_gt_boxes, iou_thresh)
+                    tp[cls - 1] += cls_tp
+                    fp[cls - 1] += cls_fp
+                    fn[cls - 1] += cls_fn
+
+    total_tp = tp.sum()
+    total_fp = fp.sum()
+    total_fn = fn.sum()
+
+    precision = (total_tp / (total_tp + total_fp + 1e-6)).item()
+    recall = (total_tp / (total_tp + total_fn + 1e-6)).item()
+    f1 = (2 * precision * recall / (precision + recall + 1e-6)) if (precision + recall) > 0 else 0.0
+
+    per_class_precision = torch.where(tp + fp > 0, tp / (tp + fp), torch.zeros_like(tp))
+    mAP = per_class_precision.mean().item()
+
+    return precision, recall, f1, mAP
+
+
+# ---------------------------
 # Train Shadow Model
 # ---------------------------
 def train_shadow_finetune(cfg):
@@ -333,17 +419,23 @@ def train_shadow_finetune(cfg):
     print("Shadow Model Training Configuration (Simplified MIA Flow)")
     print(f"{'='*60}")
 
-    # Check if external dataloaders are provided
+    # Prefer explicitly provided shadow loaders, then generic external loaders
+    shadow_train_loader = getattr(cfg, 'shadow_train_loader', None)
+    shadow_val_loader = getattr(cfg, 'shadow_val_loader', None)
     use_external_loaders = getattr(cfg, 'use_external_loaders', False)
 
-    if use_external_loaders:
+    if shadow_train_loader is not None or shadow_val_loader is not None:
+        if shadow_train_loader is None or shadow_val_loader is None:
+            raise ValueError("Shadow dataloaders must be provided together")
+        print("Using shadow DataLoaders provided by caller")
+        train_loader = shadow_train_loader
+        val_loader = shadow_val_loader
+    elif use_external_loaders:
         print("Using externally provided DataLoaders from pipeline")
-        train_loader = cfg.train_loader
-        val_loader = cfg.val_loader
-        # Estimate dataset sizes from dataloaders
-        train_size = len(train_loader.dataset) if hasattr(train_loader.dataset, '__len__') else 'unknown'
-        val_size = len(val_loader.dataset) if hasattr(val_loader.dataset, '__len__') else 'unknown'
-        print(f"Train samples: {train_size}, Val samples: {val_size}")
+        train_loader = getattr(cfg, 'train_loader', None)
+        val_loader = getattr(cfg, 'val_loader', None)
+        if train_loader is None or val_loader is None:
+            raise ValueError("External dataloaders enabled but missing train_loader/val_loader")
     else:
         print("Loading datasets using load_dataset module")
         print(f"{'='*60}\n")
@@ -361,9 +453,9 @@ def train_shadow_finetune(cfg):
         train_loader = test_loader  # Shadow trains on TEST set
         # val_loader already correct
 
-        train_size = len(train_loader.dataset) if hasattr(train_loader.dataset, '__len__') else 'unknown'
-        val_size = len(val_loader.dataset) if hasattr(val_loader.dataset, '__len__') else 'unknown'
-        print(f"Train samples (TEST set): {train_size}, Val samples (VAL set): {val_size}")
+    train_size = len(train_loader.dataset) if hasattr(train_loader.dataset, '__len__') else 'unknown'
+    val_size = len(val_loader.dataset) if hasattr(val_loader.dataset, '__len__') else 'unknown'
+    print(f"Train samples: {train_size}, Val samples: {val_size}")
 
     print(f"{'='*60}\n")
 
@@ -404,7 +496,14 @@ def train_shadow_finetune(cfg):
         print(f"📉 Epoch {epoch+1} Train Loss: {avg_loss:.4f}")
 
         num_classes = getattr(cfg, 'num_classes', 20)
-        precision, recall, f1, mAP = evaluate(model, val_loader, device, iou_thresh=0.5, score_thresh=score_thresh, num_classes=num_classes)
+        precision, recall, f1, mAP = evaluate_shadow(
+            model,
+            val_loader,
+            device,
+            iou_thresh=0.5,
+            score_thresh=score_thresh,
+            num_classes=num_classes,
+        )
         if save_model and f1 > best_f1:
             best_f1 = f1
             torch.save(model.state_dict(), best_path)
