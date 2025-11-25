@@ -3,10 +3,7 @@ import os
 import sys
 
 import numpy as np
-import torch
-from torch import optim
 
-from estimator import EstimatorFactory
 from method import load_config
 from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
@@ -24,9 +21,7 @@ def main():
     # 1.加载配置文件
     user_config = load_config(evaluation_path)
     model_instantiation_config = user_config["model"]["instantiation"]
-    model_estimator_config = user_config["model"]["estimator"]
     evaluation_config = user_config["evaluation"]
-    task = model_estimator_config.get("task", "classification")
     ResultSender.send_log("进度", "配置文件已加载完毕")
 
     # 2.初始化模型
@@ -38,27 +33,17 @@ def main():
     )
     ResultSender.send_log("进度", "模型初始化完成")
 
-    # 3.获取优化器和损失函数
-
-    params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr=5e-3, momentum=0.9, weight_decay=5e-4)
-    loss = None
-
-    # 4.生成估计器
-    estimator = EstimatorFactory.create(
-        model=model,
-        loss=loss,
-        optimizer=optimizer,
-        config=model_estimator_config,
-    )
-    ResultSender.send_log("进度", "估计器已生成")
-
-    # 5.加载数据
+    # 3.加载数据
     train_loader, val_loader, test_loader = load_data()
     ResultSender.send_log("进度", "数据集已加载")
 
-    # 6.根据传入的评测类型进行评测
-    evaluation_mia_detection(estimator, train_loader, val_loader, test_loader, evaluation_config["safety"])
+    # 4.根据传入的评测类型进行评测
+    safety_cfg = evaluation_config["safety"]
+    # 将模型定义信息传递给 MIA 评测，便于影子模型加载
+    safety_cfg.setdefault("model_path", model_instantiation_config.get("model_path", ""))
+    safety_cfg.setdefault("model_name", model_instantiation_config.get("model_name", ""))
+    safety_cfg.setdefault("model_parameters", model_instantiation_config.get("parameters", {}))
+    evaluation_mia_detection(train_loader, val_loader, test_loader, safety_cfg, target_model=model)
 
     ResultSender.send_log("进度", "评测结束")
 
