@@ -109,7 +109,7 @@ def _normalize_boxes(boxes: np.ndarray, width: float, height: float) -> np.ndarr
 
 
 def generate_pointsets(
-    model: torch.nn.Module,
+    predictor: torch.nn.Module,
     image_paths: Sequence[Path],
     img_size: int,
     device: torch.device,
@@ -124,7 +124,8 @@ def generate_pointsets(
     """Run detection model to build padded point sets for MIA training.
 
     Args:
-        model: Target or shadow model.
+        predictor: Target or shadow model/estimator. Must expose ``predict``
+            returning a list of detection dicts or be directly callable.
         image_paths: Iterable of image files.
         img_size: Resize dimension before inference.
         device: Torch device for inference.
@@ -138,7 +139,8 @@ def generate_pointsets(
     Returns:
         List of :class:`DetectionSample` objects.
     """
-    model.eval()
+    if hasattr(predictor, "eval"):
+        predictor.eval()
     dataset: List[DetectionSample] = []
     paths = list(image_paths)
     if max_samples is not None:
@@ -160,7 +162,11 @@ def generate_pointsets(
                 )
                 images.append(tensor.to(device))
 
-            outputs = model(images)
+            if hasattr(predictor, "predict"):
+                batch_tensor = torch.stack(images)
+                outputs = predictor.predict(batch_tensor)
+            else:
+                outputs = predictor(images)
             for output, (orig_w, orig_h) in zip(outputs, sizes):
                 boxes = output.get("boxes", torch.empty((0, 4))).cpu().numpy()
                 scores = output.get("scores", torch.empty((0,))).cpu().numpy()

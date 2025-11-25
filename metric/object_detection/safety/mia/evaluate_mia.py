@@ -5,17 +5,16 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Sequence, Tuple
+from typing import Any, Dict, Mapping, Sequence, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import yaml
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score
-from torchvision.models.detection import FasterRCNN
-from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 
+from estimator import EstimatorFactory
+from method import load_config
 from utils.SecAISender import ResultSender
 
 from .utils import (
@@ -33,12 +32,16 @@ LOGGER = logging.getLogger(__name__)
 class MIADetectionConfig:
     """Configuration for detection MIA pipeline."""
 
-    target_model: Path
-    shadow_model: Path
+    target_weight: Path
+    shadow_weight: Path
     attack_model_out: Path
     train_dir: Path
     val_dir: Path
     test_dir: Path
+    model_path: Path
+    model_name: str
+    model_parameters: Mapping[str, Any]
+    estimator_config: Dict[str, Any]
     img_size: int = 640
     num_classes: int = 20
     canvas_size: int = 300
@@ -62,27 +65,30 @@ class MIADetectionConfig:
     @classmethod
     def load(cls, attack_cfg: Path, user_cfg: Path) -> "MIADetectionConfig":
         """Load configuration from yaml definitions."""
-        with open(attack_cfg, "r", encoding="utf-8") as handle:
-            attack_data = yaml.safe_load(handle) or {}
-        with open(user_cfg, "r", encoding="utf-8") as handle:
-            user_data = yaml.safe_load(handle) or {}
+        attack_data = load_config(attack_cfg)
+        user_data = load_config(user_cfg)
 
         params: Dict[str, Any] = attack_data.get("parameters", {}).get("optional", {})
         model_section: Dict[str, Any] = user_data.get("model", {})
-        eval_section: Dict[str, Any] = user_data.get("evaluation", {})
         dataset_section: Dict[str, Any] = model_section.get("dataset", {})
+        instantiation: Dict[str, Any] = model_section.get("instantiation", {})
+        estimator_config: Dict[str, Any] = model_section.get("estimator", {})
 
-        target_path = Path(model_section.get("instantiation", {}).get("weight_path", "fasterrcnn_dior.pt"))
+        target_path = Path(instantiation.get("weight_path", "fasterrcnn_dior.pt"))
         shadow_path = Path(params.get("shadow_model", "runs/shadow_train/exp/best.pt"))
         attack_out = Path(params.get("attack_model", "runs/attacker_train/exp/best.pth"))
 
         return cls(
-            target_model=target_path,
-            shadow_model=shadow_path,
+            target_weight=target_path,
+            shadow_weight=shadow_path,
             attack_model_out=attack_out,
             train_dir=Path(dataset_section.get("train_dir", "data/dataset/dior/train")),
             val_dir=Path(dataset_section.get("val_dir", "data/dataset/dior/val")),
             test_dir=Path(dataset_section.get("test_dir", "data/dataset/dior/test")),
+            model_path=Path(instantiation.get("model_path", "")),
+            model_name=instantiation.get("model_name", ""),
+            model_parameters=instantiation.get("parameters", {}),
+            estimator_config=estimator_config,
             img_size=params.get("img_size", 640),
             num_classes=params.get("num_classes", 20),
             canvas_size=params.get("canvas_size", 300),
@@ -106,11 +112,14 @@ class MIADetectionConfig:
 
     @property
     def torch_device(self) -> torch.device:
-        if self.device == "cpu" or not torch.cuda.is_available():
+        estimator_params = self.estimator_config.get("parameters", {}) if self.estimator_config else {}
+        estimator_device = estimator_params.get("device_type") or estimator_params.get("device")
+        requested = self.device if self.device != "auto" else estimator_device
+        if requested == "cpu" or not torch.cuda.is_available():
             return torch.device("cpu")
-        if self.device == "auto":
+        if requested in {None, "auto", "gpu", "cuda"}:
             return torch.device("cuda")
-        return torch.device(self.device)
+        return torch.device(str(requested))
 
 
 class AttackModel(nn.Module):
@@ -179,14 +188,25 @@ class AttackModel(nn.Module):
         return self.model(x)
 
 
-def _load_faster_rcnn(weight_path: Path, num_classes: int, device: torch.device) -> FasterRCNN:
-    backbone = resnet_fpn_backbone("resnet50", weights=None)
-    model = FasterRCNN(backbone, num_classes=num_classes + 1)
-    state = torch.load(weight_path, map_location=device)
-    model.load_state_dict(state)
-    model.to(device)
-    model.eval()
-    return model
+def build_estimator(model: torch.nn.Module, loss: Any, optimizer: Any, cfg: MIADetectionConfig) -> Any:
+    """Wrap a user model with ART estimator using provided components."""
+
+    return EstimatorFactory.create(
+        model=model,
+        loss=loss,
+        optimizer=optimizer,
+        config=cfg.estimator_config,
+    )
+
+
+def _extract_image_paths(loader: Any) -> Sequence[Path]:
+    """Extract image paths from a dataloader with validation."""
+
+    dataset = getattr(loader, "dataset", None)
+    images = getattr(dataset, "images", None) if dataset is not None else None
+    if images is None:
+        raise ValueError("数据集缺少 images 属性，无法构建成员推理样本")
+    return [Path(p) for p in images]
 
 
 def _prepare_attack_dataset(
@@ -209,6 +229,8 @@ def _prepare_attack_dataset(
 
 
 def _train_attack_model(config: MIADetectionConfig, member: np.ndarray, non_member: np.ndarray) -> Tuple[AttackModel, Dict[str, float]]:
+    """Train the CNN attacker using member/non-member canvases."""
+
     device = config.torch_device
     labels = np.concatenate([np.ones(len(member)), np.zeros(len(non_member))])
     data = np.concatenate([member, non_member], axis=0)
@@ -277,23 +299,66 @@ def _train_attack_model(config: MIADetectionConfig, member: np.ndarray, non_memb
     return attack, best_metrics
 
 
-def evaluation_mia_detection(attack_config: str, user_config: str) -> Dict[str, Any]:
-    """Unified entry point mirroring the original pipeline."""
-    cfg = MIADetectionConfig.load(Path(attack_config), Path(user_config))
+def evaluation_mia_detection(
+    estimator: Any,
+    train_loader: Any,
+    val_loader: Any,
+    test_loader: Any,
+    safety_config: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """按照 ``eval_start`` 示例运行目标检测的成员推理攻击。"""
+
+    attack_cfg_path = (
+        safety_config.get("attack_config")
+        or safety_config.get("mia_attack_config")
+        or safety_config.get("mia_config")
+        or "config/attack/miadet.yaml"
+    )
+    attack_cfg = load_config(attack_cfg_path) if attack_cfg_path else {}
+    attack_params = attack_cfg.get("parameters", {}).get("optional", {}) if isinstance(attack_cfg, dict) else {}
+
+    cfg = MIADetectionConfig(
+        target_weight=Path(attack_params.get("target_weight", "target.pt")),
+        shadow_weight=Path(attack_params.get("shadow_model", "runs/shadow_train/exp/best.pt")),
+        attack_model_out=Path(attack_params.get("attack_model", "runs/attacker_train/exp/best.pth")),
+        train_dir=Path(getattr(getattr(train_loader, "dataset", None), "root", "data/dataset/dior/train")),
+        val_dir=Path(getattr(getattr(val_loader, "dataset", None), "root", "data/dataset/dior/val")),
+        test_dir=Path(getattr(getattr(test_loader, "dataset", None), "root", "data/dataset/dior/test")),
+        model_path=Path(attack_params.get("model_path", "")),
+        model_name=str(attack_params.get("model_name", "")),
+        model_parameters=attack_params.get("model_parameters", {}),
+        estimator_config=getattr(estimator, "config", {}),
+        img_size=attack_params.get("img_size", 640),
+        num_classes=attack_params.get("num_classes", 20),
+        canvas_size=attack_params.get("canvas_size", 300),
+        max_len=attack_params.get("max_len", 50),
+        log_score=attack_params.get("log_score", 2),
+        canvas_type=attack_params.get("canvas_type", "original"),
+        normalize_canvas=attack_params.get("normalize_canvas", True),
+        attack_epochs=attack_params.get("attack_epochs", 80),
+        attack_batch=attack_params.get("attack_batch_size", 32),
+        attack_lr=attack_params.get("attack_lr", 1e-5),
+        attack_weight_decay=attack_params.get("attack_weight_decay", 1e-3),
+        attack_model_type=attack_params.get("attack_model_type", "alex"),
+        attack_val_split=attack_params.get("attack_val_split", 0.2),
+        attack_patience=attack_params.get("attack_patience", 5),
+        canvas_save_samples=attack_params.get("canvas_save_samples", 0),
+        canvas_save_dir=Path(attack_params["canvas_save_dir"]) if attack_params.get("canvas_save_dir") else None,
+        member_samples=attack_params.get("member_samples", 3000),
+        nonmember_samples=attack_params.get("nonmember_samples", 3000),
+        device=attack_params.get("device", "auto"),
+    )
+
     device = cfg.torch_device
 
-    ResultSender.send_log("进度", "开始加载数据与模型")
-
-    train_images = load_dataset(cfg.train_dir)
-    val_images = load_dataset(cfg.val_dir)
-    test_images = load_dataset(cfg.test_dir)
-
-    target_model = _load_faster_rcnn(cfg.target_model, cfg.num_classes, device)
-    shadow_model = _load_faster_rcnn(cfg.shadow_model, cfg.num_classes, device)
+    train_images = _extract_image_paths(train_loader)
+    val_images = _extract_image_paths(val_loader)
+    test_images = _extract_image_paths(test_loader)
 
     ResultSender.send_log("进度", "生成影子模型特征")
+    shadow_estimator = estimator
     member_samples = generate_pointsets(
-        shadow_model,
+        shadow_estimator,
         test_images,
         cfg.img_size,
         device,
@@ -303,7 +368,7 @@ def evaluation_mia_detection(attack_config: str, user_config: str) -> Dict[str, 
         max_samples=cfg.member_samples,
     )
     non_member_samples = generate_pointsets(
-        shadow_model,
+        shadow_estimator,
         val_images,
         cfg.img_size,
         device,
@@ -313,14 +378,15 @@ def evaluation_mia_detection(attack_config: str, user_config: str) -> Dict[str, 
         max_samples=cfg.nonmember_samples,
     )
 
-    member_canvas, member_labels = _prepare_attack_dataset(member_samples, cfg)
-    non_member_canvas, non_member_labels = _prepare_attack_dataset(non_member_samples, cfg)
+    member_canvas, _ = _prepare_attack_dataset(member_samples, cfg)
+    non_member_canvas, _ = _prepare_attack_dataset(non_member_samples, cfg)
 
     attack_model, metrics = _train_attack_model(cfg, member_canvas, non_member_canvas)
 
     ResultSender.send_log("进度", "在目标模型上提取评估样本")
+    target_estimator = estimator
     target_member = generate_pointsets(
-        target_model,
+        target_estimator,
         train_images,
         cfg.img_size,
         device,
@@ -330,7 +396,7 @@ def evaluation_mia_detection(attack_config: str, user_config: str) -> Dict[str, 
         max_samples=cfg.member_samples,
     )
     target_non_member = generate_pointsets(
-        target_model,
+        target_estimator,
         test_images,
         cfg.img_size,
         device,
@@ -367,4 +433,10 @@ def evaluation_mia_detection(attack_config: str, user_config: str) -> Dict[str, 
     return result
 
 
-__all__ = ["evaluation_mia_detection", "MIADetectionConfig", "AttackModel"]
+__all__ = [
+    "evaluation_mia_detection",
+    "MIADetectionConfig",
+    "AttackModel",
+    "build_estimator",
+    "load_dataset",
+]

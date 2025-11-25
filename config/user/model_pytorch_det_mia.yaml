@@ -1,8 +1,13 @@
 model:
   instantiation:
-    weight_path: "runs/target_train/exp/best.pt"
+    model_path: "fasterrcnn_test/model.py"
+    model_name: "TorchvisionDetector"
+    weight_path: "fasterrcnn_test/dior_clean_best.pt"
     parameters:
       num_classes: 20
+      network: "fasterrcnn"
+      pretrained: false
+      trainable_backbone_layers: 3
   dataset:
     train_dir: "data/dataset/dior/train"
     val_dir: "data/dataset/dior/val"
@@ -15,5 +20,6 @@ model:
       nb_classes: 20
       device_type: "gpu"
 evaluation:
+  attack_config: "config/attack/miadet.yaml"
   safety:
     membership_inference_detection: ["mia_det"]
