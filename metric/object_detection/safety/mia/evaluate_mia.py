@@ -65,6 +65,10 @@ class MIADetectionConfig:
     member_samples: int = 3000
     nonmember_samples: int = 3000
     device: str = "auto"
+    shadow_epochs: int = 5
+    shadow_batch_size: int = 4
+    shadow_lr: float = 1e-3
+    shadow_weight_decay: float = 1e-4
 
     @classmethod
     def load(cls, attack_cfg: Path, user_cfg: Path) -> "MIADetectionConfig":
@@ -115,6 +119,10 @@ class MIADetectionConfig:
             member_samples=params.get("member_samples", 3000),
             nonmember_samples=params.get("nonmember_samples", 3000),
             device=params.get("device", "auto"),
+            shadow_epochs=params.get("shadow_epochs", 5),
+            shadow_batch_size=params.get("shadow_batch_size", 4),
+            shadow_lr=params.get("shadow_lr", 1e-3),
+            shadow_weight_decay=params.get("shadow_weight_decay", 1e-4),
         )
 
     @property
@@ -228,6 +236,44 @@ def _load_estimator_from_weights(
     model = load_model(model_path, model_name, str(weight_path), model_parameters)
     model.eval()
     return build_estimator(model, loss=None, optimizer=None, cfg=cfg)
+
+
+def _train_shadow_model(
+    cfg: MIADetectionConfig,
+    train_loader: Any,
+    val_loader: Any,
+    test_loader: Any,
+) -> Path:
+    """Train a shadow model when weights are not provided.
+
+    The training follows the simplified flow from ``add/train_shadow.py``:
+    - shadow members come from the provided ``test_loader``
+    - shadow non-members come from ``val_loader``
+    """
+
+    from add.train_shadow import train_shadow_finetune
+
+    LOGGER.info("未找到影子模型权重，开始训练影子模型：%s", cfg.shadow_weight)
+
+    # train_loader is kept for signature clarity with the main pipeline
+    # even though the simplified flow relies on test/val split for shadow data
+    _ = train_loader
+
+    class _ShadowCfg:
+        use_external_loaders = True
+        train_loader = test_loader
+        val_loader = val_loader
+        img_size = cfg.img_size
+        SHADOW_BATCH_SIZE = cfg.shadow_batch_size
+        SHADOW_EPOCHS = cfg.shadow_epochs
+        SHADOW_LR = cfg.shadow_lr
+        weight_decay = cfg.shadow_weight_decay
+        SHADOW_MODEL_DIR = str(cfg.shadow_weight)
+        num_classes = cfg.num_classes
+
+    cfg.shadow_weight.parent.mkdir(parents=True, exist_ok=True)
+    train_shadow_finetune(_ShadowCfg())
+    return cfg.shadow_weight
 
 
 def _extract_image_paths(loader: Any) -> Sequence[Path]:
@@ -389,12 +435,16 @@ def evaluation_mia_detection(
     val_images = _extract_image_paths(val_loader)
     test_images = _extract_image_paths(test_loader)
 
-    ResultSender.send_log("进度", "生成影子模型特征")
+    ResultSender.send_log("进度", "训练并使用影子模型生成特征")
+    shadow_weight = cfg.shadow_weight
+    if not shadow_weight.exists():
+        _train_shadow_model(cfg, train_loader, val_loader, test_loader)
+
     shadow_model_path = cfg.shadow_model_path or cfg.model_path
     shadow_model_name = cfg.shadow_model_name or cfg.model_name
     shadow_model_parameters = cfg.shadow_model_parameters or cfg.model_parameters
     shadow_estimator = _load_estimator_from_weights(
-        cfg.shadow_weight, shadow_model_path, shadow_model_name, shadow_model_parameters, cfg, estimator
+        shadow_weight, shadow_model_path, shadow_model_name, shadow_model_parameters, cfg, estimator
     )
     member_samples = generate_pointsets(
         shadow_estimator,
