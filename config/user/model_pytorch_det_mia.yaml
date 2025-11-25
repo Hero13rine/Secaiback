@@ -1,0 +1,19 @@
+model:
+  instantiation:
+    weight_path: "runs/target_train/exp/best.pt"
+    parameters:
+      num_classes: 20
+  dataset:
+    train_dir: "data/dataset/dior/train"
+    val_dir: "data/dataset/dior/val"
+    test_dir: "data/dataset/dior/test"
+  estimator:
+    framework: "pytorch"
+    task: "detection"
+    parameters:
+      input_shape: [3, 640, 640]
+      nb_classes: 20
+      device_type: "gpu"
+evaluation:
+  safety:
+    membership_inference_detection: ["mia_det"]
