@@ -134,29 +134,42 @@ def collate_fn(batch):
 
 
 def load_data(
-    root: str | Path,
+    train_root: str | Path | None = None,
+    val_root: str | Path | None = None,
+    test_root: str | Path | None = None,
     batch_size: int = 2,
     shuffle: bool = False,
     num_workers: int = 2,
-    augment: bool = False
-) -> DataLoader:
+    augment: bool = False,
+):
     """
-    Create a DataLoader for evaluation/testing (or quick sanity-check training).
-    Args:
-        root: dataset root directory; allows <root>/images and <root>/labels, or flat layout (*.jpg + *.txt).
-        batch_size: batch size.
-        shuffle: shuffle samples (commonly False for test/val).
-        num_workers: number of workers for loading.
-        augment: enable simple augmentation (currently horizontal flip).
-    Returns:
-        test_dataloader: torch.utils.data.DataLoader
+    Create DataLoader objects for YOLO-format detection datasets.
+
+    When only ``train_root`` is provided the function preserves the original
+    single-loader behavior. If no roots are provided, the DIOR default paths
+    are used and a tuple of ``(train_loader, val_loader, test_loader)`` is
+    returned to align with the ``eval_start`` example.
     """
-    dataset = ObjDataset(root, augment=augment)
-    test_dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        collate_fn=collate_fn
-    )
-    return test_dataloader
+
+    def _build(root_path: str | Path) -> DataLoader:
+        dataset = ObjDataset(root_path, augment=augment)
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            collate_fn=collate_fn,
+        )
+
+    if train_root is None and val_root is None and test_root is None:
+        train_root = Path("data/dataset/dior/train")
+        val_root = Path("data/dataset/dior/val")
+        test_root = Path("data/dataset/dior/test")
+
+    if val_root is None and test_root is None and train_root is not None:
+        return _build(train_root)
+
+    train_loader = _build(train_root or Path("data/dataset/dior/train"))
+    val_loader = _build(val_root or Path("data/dataset/dior/val"))
+    test_loader = _build(test_root or Path("data/dataset/dior/test"))
+    return train_loader, val_loader, test_loader
