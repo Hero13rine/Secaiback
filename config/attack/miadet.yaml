@@ -1,0 +1,23 @@
+parameters:
+  optional:
+    shadow_model: "runs/shadow_train/exp/best.pt"
+    attack_model: "runs/attacker_train/exp/best.pth"
+    img_size: 640
+    num_classes: 20
+    canvas_size: 300
+    max_len: 50
+    log_score: 2
+    canvas_type: "original"
+    normalize_canvas: true
+    attack_epochs: 80
+    attack_batch_size: 32
+    attack_lr: 1.0e-05
+    attack_weight_decay: 0.001
+    attack_model_type: "alex"
+    attack_val_split: 0.2
+    attack_patience: 5
+    canvas_save_samples: 0
+    canvas_save_dir: null
+    member_samples: 3000
+    nonmember_samples: 3000
+    device: "auto"
