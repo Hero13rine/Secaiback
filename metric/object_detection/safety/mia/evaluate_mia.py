@@ -14,6 +14,7 @@ import torch.optim as optim
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score
 
 from estimator import EstimatorFactory
+from model import load_model
 from method import load_config
 from utils.SecAISender import ResultSender
 
@@ -34,6 +35,9 @@ class MIADetectionConfig:
 
     target_weight: Path
     shadow_weight: Path
+    shadow_model_path: Path | None = None
+    shadow_model_name: str | None = None
+    shadow_model_parameters: Mapping[str, Any] | None = None
     attack_model_out: Path
     train_dir: Path
     val_dir: Path
@@ -88,6 +92,9 @@ class MIADetectionConfig:
             model_path=Path(instantiation.get("model_path", "")),
             model_name=instantiation.get("model_name", ""),
             model_parameters=instantiation.get("parameters", {}),
+            shadow_model_path=Path(params.get("shadow_model_path", instantiation.get("model_path", ""))),
+            shadow_model_name=params.get("shadow_model_name", instantiation.get("model_name", "")),
+            shadow_model_parameters=params.get("shadow_model_parameters", instantiation.get("parameters", {})),
             estimator_config=estimator_config,
             img_size=params.get("img_size", 640),
             num_classes=params.get("num_classes", 20),
@@ -197,6 +204,30 @@ def build_estimator(model: torch.nn.Module, loss: Any, optimizer: Any, cfg: MIAD
         optimizer=optimizer,
         config=cfg.estimator_config,
     )
+
+
+def _load_estimator_from_weights(
+    weight_path: Path,
+    model_path: Path,
+    model_name: str,
+    model_parameters: Mapping[str, Any],
+    cfg: MIADetectionConfig,
+    fallback: Any,
+) -> Any:
+    """Load a dedicated estimator instance when weight file is available.
+
+    If the configured weight file does not exist, the provided ``fallback``
+    estimator is returned to keep backward compatibility with environments
+    that only supply a single initialized model.
+    """
+
+    if not weight_path or not weight_path.exists():
+        LOGGER.warning("Configured weight %s 不存在，回退到已有估计器", weight_path)
+        return fallback
+
+    model = load_model(model_path, model_name, str(weight_path), model_parameters)
+    model.eval()
+    return build_estimator(model, loss=None, optimizer=None, cfg=cfg)
 
 
 def _extract_image_paths(loader: Any) -> Sequence[Path]:
@@ -327,6 +358,9 @@ def evaluation_mia_detection(
         model_path=Path(attack_params.get("model_path", "")),
         model_name=str(attack_params.get("model_name", "")),
         model_parameters=attack_params.get("model_parameters", {}),
+        shadow_model_path=Path(attack_params.get("shadow_model_path", attack_params.get("model_path", ""))),
+        shadow_model_name=str(attack_params.get("shadow_model_name", attack_params.get("model_name", ""))),
+        shadow_model_parameters=attack_params.get("shadow_model_parameters", attack_params.get("model_parameters", {})),
         estimator_config=getattr(estimator, "config", {}),
         img_size=attack_params.get("img_size", 640),
         num_classes=attack_params.get("num_classes", 20),
@@ -356,7 +390,12 @@ def evaluation_mia_detection(
     test_images = _extract_image_paths(test_loader)
 
     ResultSender.send_log("进度", "生成影子模型特征")
-    shadow_estimator = estimator
+    shadow_model_path = cfg.shadow_model_path or cfg.model_path
+    shadow_model_name = cfg.shadow_model_name or cfg.model_name
+    shadow_model_parameters = cfg.shadow_model_parameters or cfg.model_parameters
+    shadow_estimator = _load_estimator_from_weights(
+        cfg.shadow_weight, shadow_model_path, shadow_model_name, shadow_model_parameters, cfg, estimator
+    )
     member_samples = generate_pointsets(
         shadow_estimator,
         test_images,
@@ -384,7 +423,9 @@ def evaluation_mia_detection(
     attack_model, metrics = _train_attack_model(cfg, member_canvas, non_member_canvas)
 
     ResultSender.send_log("进度", "在目标模型上提取评估样本")
-    target_estimator = estimator
+    target_estimator = _load_estimator_from_weights(
+        cfg.target_weight, cfg.model_path, cfg.model_name, cfg.model_parameters, cfg, estimator
+    )
     target_member = generate_pointsets(
         target_estimator,
         train_images,
