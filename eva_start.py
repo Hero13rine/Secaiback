@@ -14,6 +14,11 @@ from metric.classification.fairness.fairness_metrics import calculate_fairness_m
 from metric.object_detection.robustness import (
     evaluation_robustness as detection_evaluation_robustness,
 )
+from metric.object_detection.generaliazation.generaliazation import (
+    evaluate_cross_dataset_generalization,
+)
+from utils.convert import convert_with_config
+
 
 # 将目标路径添加到系统路径
 sys.path.append('/app/userData/modelData/')
@@ -95,7 +100,35 @@ def main():
     elif evaluation_type == "interpretability":
         GradientShap(model, test_loader)
     elif evaluation_type == "generalization":
-        evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
+        if task == "detection":
+            convert_cfg = {
+                "src_images": os.getenv("CONVERT_SRC_IMAGES", "/wkm/data/dota/DOTA/test/images"),
+                "src_labels": os.getenv("CONVERT_SRC_LABELS", "/wkm/data/dota/DOTA/test/labels"),
+                "dst_images": os.getenv("CONVERT_DST_IMAGES", "/wkm/data/dota_dior/test"),
+                "dst_labels": os.getenv("CONVERT_DST_LABELS", "/wkm/data/dota_dior/test"),
+                "src_classes": os.getenv("CONVERT_SRC_CLASSES", "/wkm/data/dota.txt"),
+                "dst_classes": os.getenv("CONVERT_DST_CLASSES", "/wkm/data/dior.txt"),
+            }
+            if all(convert_cfg.values()):
+                try:
+                    ResultSender.send_log("进度", "开始转换数据集标签")
+                    convert_with_config(convert_cfg)
+                    ResultSender.send_log("进度", "数据集标签转换完成")
+                except Exception as exc:
+                    ResultSender.send_log("警告", f"转换数据集标签失败: {exc}")
+            # 检测泛化评测
+            dataset_loaders = {
+                "source_train": load_data("/wkm/data/dior/test/test"),
+                "target_val": load_data("/wkm/data/dota_dior/test"),
+            }
+            evaluate_cross_dataset_generalization(
+                estimator,
+                dataset_loaders,
+                evaluation_config["generalization"]["generalization_testing"],
+            )
+        else:
+            # 分类泛化评测
+            evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
     
     elif evaluation_type == "fairness":
             if task == "detection":

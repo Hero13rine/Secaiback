@@ -23,6 +23,9 @@ evaluation:
   robustness: []
   interpretability: []
   safety: []
-  generalization: []
+  generalization:
+    generalization_testing:            # 泛化能力测试
+      metrics:                         # 泛化能力评估指标列表
+      - gap_pairs
   fairness:
     metrics: ["performance_gap"]

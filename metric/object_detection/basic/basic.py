@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, List, Sequence, Tuple, Union
 import numpy as np
 
 
-from utils.sender import RemoteResultSender as ResultSender
+from utils.SecAISender import  ResultSender
 # from utils.sender import ConsoleResultSender as ResultSender # 本地调试时使用
 
 
