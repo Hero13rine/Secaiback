@@ -83,7 +83,16 @@ def main():
     elif evaluation_type == "robustness":
         evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
     elif evaluation_type == "interpretability":
-        GradientShap(model, test_loader)
+        if task == "detection":
+            from metric.object_detection.interpretability.fidelity import run_detection_interpretability
+            run_detection_interpretability(
+                model,
+                estimator,
+                test_loader,
+                evaluation_config=evaluation_config["interpretability"],
+            )
+        else:
+            GradientShap(model, test_loader)
     elif evaluation_type == "generalization":
         evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
     

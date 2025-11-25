@@ -1,0 +1,37 @@
+# PyTorch Faster R-CNN detection robustness configuration
+model:
+  instantiation:
+    model_path: "fasterrcnn_test/model_builtin.py"
+    weight_path: ""  # Îª¿ÕÔòÊ¹ÓÃtorchvisionÔ¤ÑµÁ·£¬ÈôÓĞ×ÔÑµÈ¨ÖØ¿ÉÌîÂ·¾¶
+    model_name: "fasterrcnn_resnet50_fpn"
+    parameters:
+      "num_classes": 20
+      "network": "fasterrcnn"
+      "pretrained": True
+      "trainable_backbone_layers": 3
+  estimator:
+    framework: "pytorch"
+    task: "detection"
+    parameters:
+      input_shape: [3, -1, -1]
+      clip_values: [0, 1]
+      device: "cuda"
+      device_type: "gpu"
+      batch_size: 1
+evaluation:
+  # basic: ["map", "accuracy", "precision"]
+  interpretability:
+    model_fidelity:
+      score_threshold: 0.3
+      topk: 5
+      match_iou: 0.5
+      perturbation: blur
+      keep_mask_outside: true
+      grad_cam:
+        output_dir: "outputs/fidelity_gradcam"
+        class_names_path: "fasterrcnn_test/classes.txt"
+        max_examples: 3
+        #åªæœ‰ keep/drop åŒæ—¶è¾¾åˆ°è®¾å®šé˜ˆå€¼çš„æ£€æµ‹æ‰ä¼šè§¦å?Grad-CAM
+        min_keep_ratio: 0.85
+        min_drop_ratio: 0.75
+        score_threshold: 0.4    #è§¦å‘çƒ­åŠ›å›¾çš„æœ€ä½åŸå§‹ç½®ä¿¡åº¦
