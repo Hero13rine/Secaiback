@@ -238,7 +238,7 @@ def train_shadow_finetune(cfg):
                 raise FileNotFoundError(f"Pretrained model not found: {pretrained_path}")
 
             ResultSender.send_log("进度",f"Using local pretrained weights: {pretrained_path}")
-            model = fasterrcnn_resnet50_fpn(weights=None)
+            model = fasterrcnn_resnet50_fpn(weights=None, weights_backbone=None)
             state_dict = torch.load(pretrained_path, map_location=device)
             missing, unexpected = model.load_state_dict(state_dict, strict=False)
             if missing:
@@ -246,12 +246,12 @@ def train_shadow_finetune(cfg):
             if unexpected:
                 print(f"⚠️ Unexpected keys in pretrained weights: {unexpected}")
         else:
-            model = fasterrcnn_resnet50_fpn(weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT)
+            model = fasterrcnn_resnet50_fpn(weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT, weights_backbone=None)
 
         in_features = model.roi_heads.box_predictor.cls_score.in_features
         model.roi_heads.box_predictor = FastRCNNPredictor(in_features, getattr(cfg, 'num_classes', 20) + 1)
     else:
-        model = fasterrcnn_resnet50_fpn(weights=None, num_classes=getattr(cfg, 'num_classes', 20) + 1)
+        model = fasterrcnn_resnet50_fpn(weights=None, weights_backbone=None, num_classes=getattr(cfg, 'num_classes', 20) + 1)
     model.to(device)
 
     params = [p for p in model.parameters() if p.requires_grad]
