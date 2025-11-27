@@ -11,6 +11,14 @@ from metric.classification.safety.membershipinference.evaluate_mia import evalua
 from utils.SecAISender import ResultSender
 from metric.classification.robustness.evaluate_robustness import evaluation_robustness
 from metric.classification.fairness.fairness_metrics import calculate_fairness_metrics
+from metric.object_detection.robustness import (
+    evaluation_robustness as detection_evaluation_robustness,
+)
+from metric.object_detection.generaliazation.generaliazation import (
+    evaluate_cross_dataset_generalization,
+)
+from utils.convert import convert_with_config
+
 
 # 将目标路径添加到系统路径
 sys.path.append('/app/userData/modelData/')
@@ -68,20 +76,30 @@ def main():
     ResultSender.send_log("进度", "估计器已生成")
 
     # 5.加载数据
-    test_loader = load_data()
+    if evaluation_type == "safety":
+        train_loader, val_loader, test_loader = load_data()
+    else:
+        test_loader = load_data()
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
     if task == "detection":
         from metric.object_detection.basic.basic import cal_basic
-        from metric.object_detection.fairness import evaluate_fairness_detection as calculate_fairness_metrics
     else:
         from metric.classification.basic.basic import cal_basic
-        from metric.classification.fairness.fairness_metrics import calculate_fairness_metrics
     if evaluation_type == "basic":
         cal_basic(estimator, test_loader, evaluation_config["basic"])
     elif evaluation_type == "robustness":
-        evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
+        if task == "detection":
+            detection_evaluation_robustness(
+                estimator=estimator,
+                test_data=test_loader,
+                config=evaluation_config,
+                batch_size=64,
+            )
+        else:
+            from metric.classification.robustness.evaluate_robustness import evaluation_robustness
+            evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
     elif evaluation_type == "interpretability":
         if task == "detection":
             from metric.object_detection.interpretability.fidelity import run_detection_interpretability
@@ -94,8 +112,45 @@ def main():
         else:
             GradientShap(model, test_loader)
     elif evaluation_type == "generalization":
-        evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
-    
+        if task == "detection":
+            convert_cfg = {
+                "src_images": os.getenv("CONVERT_SRC_IMAGES", "/app/systemData/evaluation_data/DOTA/test/images"),
+                "src_labels": os.getenv("CONVERT_SRC_LABELS", "/app/systemData/evaluation_data/DOTA/test/labels"),
+                "dst_images": os.getenv("CONVERT_DST_IMAGES", "/app/userData/modelData/data/dataset/dota/test"),
+                "dst_labels": os.getenv("CONVERT_DST_LABELS", "/app/userData/modelData/data/dataset/dota/test"),
+                "src_classes": os.getenv("CONVERT_SRC_CLASSES", "/app/systemData/evaluation_data/DOTA/test/dota.txt"),
+                "dst_classes": os.getenv("CONVERT_DST_CLASSES", "/app/userData/modelData/classes.txt"),
+            }
+            if all(convert_cfg.values()):
+                try:
+                    ResultSender.send_log("进度", "开始转换数据集标签")
+                    convert_with_config(convert_cfg)
+                    ResultSender.send_log("进度", "数据集标签转换完成")
+                except Exception as exc:
+                    ResultSender.send_log("警告", f"转换数据集标签失败: {exc}")
+            # 检测泛化评测
+            dataset_loaders = {
+                "source_train": load_data("/app/userData/modelData/data/dataset/dior/test"),
+                "target_val": load_data("/app/userData/modelData/data/dataset/dota/test"),
+            }
+            evaluate_cross_dataset_generalization(
+                estimator,
+                dataset_loaders,
+                evaluation_config["generalization"]["generalization_testing"],
+            )
+        else:
+            # 分类泛化评测
+            evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
+
+    elif evaluation_type == "safety":
+        from metric.object_detection.safety.mia.evaluate_mia import evaluation_mia_detection as evaluate_mia
+        attack_override = evaluation_config["safety"].setdefault("attack_override", {})
+        attack_override.setdefault(
+            "pretrained_model",
+            os.getenv("PRETRAINED_MODEL", "/app/systemData/pretrained_model/fasterrcnn_resnet50_fpn.pth"),
+        )
+        evaluate_mia(train_loader, val_loader, test_loader, evaluation_config["safety"], model,
+                                 model_instantiation_config)
     elif evaluation_type == "fairness":
             if task == "detection":
                 from metric.object_detection.fairness import evaluate_fairness_detection

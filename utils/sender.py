@@ -172,4 +172,9 @@ class ConsoleResultSender:
 
 
 # 默认保持与历史行为一致：生产端导入 ResultSender 获得远程实现。
-ResultSender = RemoteResultSender
+# 当缺少必要的远程地址（例如在本地调试或未注入环境变量时），
+# 自动退回到控制台输出，避免出现 "Invalid URL 'None'" 的报错。
+if RemoteResultSender.logUrl and RemoteResultSender.resultUrl:
+    ResultSender = RemoteResultSender
+else:
+    ResultSender = ConsoleResultSender

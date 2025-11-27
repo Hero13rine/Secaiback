@@ -2,7 +2,7 @@
 model:
   instantiation:
     model_path: "/wkm/secai/secai-common/tests/fasterrcnn/model.py"
-    weight_path: "/wkm/secai/secai-common/tests/fasterrcnn/dior_clean_best.pt"
+    weight_path: "/wkm/secai/secai-common/tests/fasterrcnn/faterrcnn_dior.pt"
     model_name: "TorchvisionDetector"
     parameters:
       "num_classes": 20
@@ -23,6 +23,9 @@ evaluation:
   robustness: []
   interpretability: []
   safety: []
-  generalization: []
+  generalization:
+    generalization_testing:            # 泛化能力测试
+      metrics:                         # 泛化能力评估指标列表
+      - gap_pairs
   fairness:
     metrics: ["performance_gap"]

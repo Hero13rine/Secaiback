@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
-import re
+
 import random
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -117,19 +117,14 @@ class ObjDataset(Dataset):
             if boxes.numel() > 0
             else torch.zeros((0,), dtype=torch.float32)
         )
-        match = re.search(r'\d+', img_path.stem)
-        seq = int(match.group()) if match else idx
-        group_id = seq // 1000  # 每 10 张一组
 
-        target = {
-        "boxes": boxes,
-        "labels": labels,
-        "image_id": torch.tensor([idx], dtype=torch.int64),
-        "area": area,
-        "iscrowd": torch.zeros((boxes.shape[0],), dtype=torch.int64),
-        "sensitive_attr": f"group_{group_id}",
-        "image_path": str(img_path),
-    }
+        target: Dict[str, torch.Tensor] = {
+            "boxes": boxes,
+            "labels": labels,
+            "image_id": torch.tensor([idx], dtype=torch.int64),
+            "area": area,
+            "iscrowd": torch.zeros((boxes.shape[0],), dtype=torch.int64),
+        }
         return img_t, target
 
 
@@ -139,7 +134,7 @@ def collate_fn(batch):
 
 
 def load_data(
-    root: str | Path = '/wkm/data/dior/test/test',
+    root: str | Path,
     batch_size: int = 2,
     shuffle: bool = False,
     num_workers: int = 2,

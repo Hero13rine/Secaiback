@@ -3,14 +3,31 @@
 from .adversarial import (
     AdversarialRobustnessEvaluator,
     AttackEvaluationResult,
-    RotationRobustnessMetrics,
+    RobustnessMetrics,
 )
-from .evaluate_robustness import evaluate_adversarial_robustness, load_robustness_config
+from .corruption import (
+    CorruptionEvaluationResult,
+    CorruptionRobustnessEvaluator,
+    CorruptionRobustnessMetrics,
+    list_available_corruptions,
+)
+from .evaluate_robustness import (
+    evaluate_adversarial_robustness,
+    evaluate_corruption_robustness,
+    evaluation_robustness,
+    load_robustness_config,
+)
 
 __all__ = [
     "AdversarialRobustnessEvaluator",
     "AttackEvaluationResult",
-    "RotationRobustnessMetrics",
+    "CorruptionEvaluationResult",
+    "CorruptionRobustnessEvaluator",
+    "CorruptionRobustnessMetrics",
+    "RobustnessMetrics",
+    "evaluation_robustness",
     "evaluate_adversarial_robustness",
+    "evaluate_corruption_robustness",
     "load_robustness_config",
+    "list_available_corruptions",
 ]
