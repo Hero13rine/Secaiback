@@ -61,6 +61,7 @@ def _normalize_keys(settings: Mapping[str, Any]) -> Mapping[str, Any]:
         "shadow_lr": "SHADOW_LR",
         "shadow_weight_decay": "SHADOW_WEIGHT_DECAY",
         "shadow_use_pretrained": "SHADOW_USE_PRETRAINED",
+        "pretrained_model": "PRETRAINED_MODEL",
         "results_dir": "RESULTS_DIR",
         "results_file": "RESULTS_FILE",
         "save_model": "SAVE_MODEL",
@@ -99,6 +100,8 @@ def step1_configure(config: SimpleNamespace):
     print(f"  - Target model: {config.TARGET_MODEL_DIR}")
     print(f"  - Shadow model: {config.SHADOW_MODEL_DIR}")
     print(f"  - Attack model: {config.ATTACK_MODEL_DIR}")
+    if getattr(config, "PRETRAINED_MODEL", None):
+        print(f"  - Pretrained weights (local): {config.PRETRAINED_MODEL}")
 
     print("\nShadow Model Training:")
     print(f"  - Epochs: {config.SHADOW_EPOCHS}")

@@ -226,9 +226,27 @@ def train_shadow_finetune(cfg):
 
     # Always use pretrained weights for shadow model (official FasterRCNN pretrained on COCO)
     use_pretrained = getattr(cfg, 'SHADOW_USE_PRETRAINED', True)
-    print(f"Loading Faster R-CNN with official pretrained weights (pretrained={use_pretrained})...")
+    pretrained_path = getattr(cfg, 'PRETRAINED_MODEL', None)
+    print(
+        "Loading Faster R-CNN with official pretrained weights "
+        f"(pretrained={use_pretrained}, path={pretrained_path})..."
+    )
     if use_pretrained:
-        model = fasterrcnn_resnet50_fpn(weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT)
+        if pretrained_path:
+            if not os.path.exists(pretrained_path):
+                raise FileNotFoundError(f"Pretrained model not found: {pretrained_path}")
+
+            print(f"Using local pretrained weights: {pretrained_path}")
+            model = fasterrcnn_resnet50_fpn(weights=None)
+            state_dict = torch.load(pretrained_path, map_location=device)
+            missing, unexpected = model.load_state_dict(state_dict, strict=False)
+            if missing:
+                print(f"⚠️ Missing keys when loading pretrained weights: {missing}")
+            if unexpected:
+                print(f"⚠️ Unexpected keys in pretrained weights: {unexpected}")
+        else:
+            model = fasterrcnn_resnet50_fpn(weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT)
+
         in_features = model.roi_heads.box_predictor.cls_score.in_features
         model.roi_heads.box_predictor = FastRCNNPredictor(in_features, getattr(cfg, 'num_classes', 20) + 1)
     else:
@@ -301,6 +319,7 @@ def train_shadow_with_config(pipeline_config, train_loader=None, val_loader=None
     cfg.SHADOW_BATCH_SIZE = pipeline_config.SHADOW_BATCH_SIZE
     cfg.SHADOW_LR = pipeline_config.SHADOW_LR
     cfg.SHADOW_USE_PRETRAINED = pipeline_config.SHADOW_USE_PRETRAINED
+    cfg.PRETRAINED_MODEL = getattr(pipeline_config, 'PRETRAINED_MODEL', None)
     cfg.SHADOW_MODEL_DIR = pipeline_config.SHADOW_MODEL_DIR
     cfg.weight_decay = pipeline_config.SHADOW_WEIGHT_DECAY
 
