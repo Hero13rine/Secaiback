@@ -1,6 +1,5 @@
 parameters:
   optional:
-    TARGET_MODEL_DIR: "fasterrcnn_dior.pt"
     SHADOW_MODEL_DIR: "runs/shadow_train/exp/best.pt"
     ATTACK_MODEL_DIR: "runs/attacker_train/exp/best.pth"
 

@@ -22,10 +22,14 @@ def _prepare_pipeline_config(
     attack_config_path = evaluation_config.get("attack_config") or None
     attack_overrides = evaluation_config.get("attack_override", {})
 
+    target_model_dir = model_instantiation.get("weight_path")
+    if not target_model_dir:
+        raise ValueError("model.instantiation.weight_path 必须提供，用于设置 TARGET_MODEL_DIR")
+
     overrides = {
         key: value
         for key, value in {
-            "TARGET_MODEL_DIR": model_instantiation.get("weight_path"),
+            "TARGET_MODEL_DIR": target_model_dir,
             **attack_overrides,
         }.items()
         if value is not None

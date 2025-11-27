@@ -16,6 +16,5 @@ model:
       nb_classes: 20
       device_type: "gpu"
 evaluation:
-  attack_config: "config/attack/miadet.yaml"
   safety:
     membership_inference_detection: ["mia_det"]
