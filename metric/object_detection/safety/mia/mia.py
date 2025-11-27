@@ -710,27 +710,42 @@ def attack_target_model(config, target_member_imgs, target_nonmember_imgs, targe
     # 计算攻击性能指标 - 增加预测分数参数
     attack_metrics = calculate_attack_metrics(target_true_labels, target_pred_labels, target_pred_scores)
     ResultSender.send_log("进度", "攻击模型预测完成，正在汇总性能指标")
-    ResultSender.send_result("Accuracy", f"{attack_metrics['accuracy']:.4f}")
-    ResultSender.send_result("Precision", f"{attack_metrics['precision']:.4f}")
-    ResultSender.send_result("Recall", f"{attack_metrics['recall']:.4f}")
-    ResultSender.send_result("F1", f"{attack_metrics['f1']:.4f}")
-    ResultSender.send_result("TPR", f"{attack_metrics['tpr']:.4f}")
-    ResultSender.send_result("FPR", f"{attack_metrics['fpr']:.4f}")
+    ResultSender.send_result("Accuracy", f"{attack_metrics['accuracy']}")
+    ResultSender.send_result("Precision", f"{attack_metrics['precision']}")
+    ResultSender.send_result("Recall", f"{attack_metrics['recall']}")
+    ResultSender.send_result("F1", f"{attack_metrics['f1']}")
+    ResultSender.send_result("TPR", f"{attack_metrics['tpr']}")
+    ResultSender.send_result("FPR", f"{attack_metrics['fpr']}")
     # If AUC is available, also send it
     if attack_metrics['auc'] is not None:
-        ResultSender.send_result("AUC", f"{attack_metrics['auc']:.4f}")
+        ResultSender.send_result("AUC", f"{attack_metrics['auc']}")
 
     # 绘制ROC曲线
     if config.save_results and attack_metrics['auc'] is not None:
         # 创建保存目录
-        results_dir = os.path.dirname(config.results_file) if os.path.dirname(config.results_file) else '.'
-        os.makedirs(results_dir, exist_ok=True)
+        try:
+            evaluate_metric = os.getenv("evaluateDimension")
+            result_path_env = os.getenv("resultPath")
 
-        # 绘制并保存ROC曲线
-        roc_path = os.path.join(results_dir, 'attack_roc_curve.png')
-        if plot_roc_curve(target_true_labels, target_pred_scores, roc_path):
-            ResultSender.send_log("进度", f"ROC曲线已保存到: {roc_path}")
-            ResultSender.send_result("ROC Curve", roc_path)
+            if not evaluate_metric or not result_path_env:
+                missing_vars = []
+                if not evaluate_metric:
+                    missing_vars.append("evaluateDimension")
+                if not result_path_env:
+                    missing_vars.append("resultPath")
+                raise ValueError(f"缺少必要的环境变量: {', '.join(missing_vars)}")
+
+            roc_filename_rel = os.path.join("..", "evaluationData", evaluate_metric, "output", "attack_roc_curve.png")
+            roc_filename_abs = os.path.join(result_path_env, evaluate_metric, "output", "attack_roc_curve.png")
+
+            output_dir = os.path.dirname(roc_filename_rel)
+            os.makedirs(output_dir, exist_ok=True)
+
+            if plot_roc_curve(target_true_labels, target_pred_scores, roc_filename_rel):
+                ResultSender.send_log("进度", f"ROC曲线已保存到: {roc_filename_rel}")
+                ResultSender.send_result("ROC Curve", roc_filename_abs)
+        except Exception as roc_error:
+            ResultSender.send_log("错误", f"ROC曲线生成失败: {roc_error}")
 
     # 保存预测结果和评估指标
     if config.save_results:
