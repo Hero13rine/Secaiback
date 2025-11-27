@@ -23,8 +23,6 @@ from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN_Res
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import box_iou
 
-# project dataset loader - the ONLY source for data loading
-from load_dataset import ObjDataset
 
 # Config will be passed as parameter when called from pipeline
 # For standalone execution, config is imported in __main__
