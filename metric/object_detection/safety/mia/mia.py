@@ -44,6 +44,7 @@ import cv2
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
 from torchvision.transforms import functional as TF
 from PIL import Image
+from utils.sender import ResultSender
 
 
 # ===============================================================
@@ -709,15 +710,23 @@ def attack_target_model(config, target_member_imgs, target_nonmember_imgs, targe
 
     # 计算攻击性能指标 - 增加预测分数参数
     attack_metrics = calculate_attack_metrics(target_true_labels, target_pred_labels, target_pred_scores)
-    print_(f"✅ 攻击模型预测完成，性能指标如下：")
-    print_(f"   - 准确率 (Accuracy): {attack_metrics['accuracy']:.4f}")
-    print_(f"   - 精确率 (Precision): {attack_metrics['precision']:.4f}")
-    print_(f"   - 召回率 (Recall): {attack_metrics['recall']:.4f}")
-    print_(f"   - F1分数 (F1 Score): {attack_metrics['f1']:.4f}")
-    print_(f"   - 真阳性率 (TPR): {attack_metrics['tpr']:.4f}")
-    print_(f"   - 假阳性率 (FPR): {attack_metrics['fpr']:.4f}")
+    ResultSender.send_log("进度", "攻击模型预测完成，正在汇总性能指标")
+    result_args = [
+        "Accuracy",
+        f"{attack_metrics['accuracy']:.4f}",
+        "Precision",
+        f"{attack_metrics['precision']:.4f}",
+        "Recall",
+        f"{attack_metrics['recall']:.4f}",
+        "F1",
+        f"{attack_metrics['f1']:.4f}",
+        "TPR",
+        f"{attack_metrics['tpr']:.4f}",
+        "FPR",
+        f"{attack_metrics['fpr']:.4f}",
+    ]
     if attack_metrics['auc'] is not None:
-        print_(f"   - AUC: {attack_metrics['auc']:.4f}")
+        result_args.extend(["AUC", f"{attack_metrics['auc']:.4f}"])
 
     # 绘制ROC曲线
     if config.save_results and attack_metrics['auc'] is not None:
@@ -728,12 +737,15 @@ def attack_target_model(config, target_member_imgs, target_nonmember_imgs, targe
         # 绘制并保存ROC曲线
         roc_path = os.path.join(results_dir, 'attack_roc_curve.png')
         if plot_roc_curve(target_true_labels, target_pred_scores, roc_path):
-            print_(f"✅ ROC曲线已保存到: {roc_path}")
+            result_args.extend(["ROC曲线", roc_path])
+            ResultSender.send_log("进度", f"ROC曲线已保存到: {roc_path}")
+
+    ResultSender.send_result(*result_args)
 
     # 保存预测结果和评估指标
     if config.save_results:
         # 仅保留最终指标的输出，移除文件保存部分
-        print_("✅ 评估完成，结果已输出")
+        ResultSender.send_log("进度", "评估完成，结果已输出")
 
 
 def evaluate_attack_with_config(
