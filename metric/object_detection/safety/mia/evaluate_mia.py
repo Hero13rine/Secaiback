@@ -12,9 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from add import load_dataset as mia_dataset
-from add.load_dataset import load_data_mia
-from add.pipeline import (
+from .pipeline import (
     PipelineConfig,
     step2_train_shadow,
     step3_train_attack,
@@ -115,38 +113,22 @@ def evaluation_mia_detection(
 ):
     """Run the membership inference attack pipeline.
 
-    The provided loaders are currently not reused because the pipeline relies on
-    ``add.load_dataset`` utilities; they are accepted to preserve the original
-    call signature.
+    DataLoaders are prepared by :mod:`eva_start_mia` and passed through to the
+    refactored pipeline so datasets are instantiated only once.
     """
 
     model_instantiation = copy.deepcopy(model_instantiation or {})
     context = _prepare_context(evaluation_config, model_instantiation)
     cfg = context.pipeline_config
 
-    # Override default dataset paths used by the add.* helpers
-    mia_dataset.DEFAULT_TRAIN_DIR = str(context.train_dir)
-    mia_dataset.DEFAULT_VAL_DIR = str(context.val_dir)
-    mia_dataset.DEFAULT_TEST_DIR = str(context.test_dir)
-
-    # Load datasets with configured paths
-    train_loader, val_loader, test_loader = load_data_mia(
-        train_root=context.train_dir,
-        val_root=context.val_dir,
-        test_root=context.test_dir,
-        batch_size=cfg.SHADOW_BATCH_SIZE,
-        num_workers=cfg.workers,
-        augment_train=cfg.TRANSFORM,
-    )
-
     # 1) train shadow model on TEST -> VAL
-    step2_train_shadow(cfg)
+    step2_train_shadow(cfg, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader)
 
     # 2) train attack model using shadow outputs
-    step3_train_attack(cfg)
+    step3_train_attack(cfg, train_loader=train_loader, test_loader=test_loader)
 
     # 3) evaluate attack against target model
-    step4_evaluate(cfg)
+    step4_evaluate(cfg, train_loader=train_loader, test_loader=test_loader)
 
 
 __all__ = ["evaluation_mia_detection"]
