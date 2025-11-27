@@ -582,7 +582,7 @@ def plot_roc_curve(true_labels, pred_scores, save_path):
         return False
 
 
-def attack_target_model(config, target_member_imgs, target_nonmember_imgs):
+def attack_target_model(config, target_member_imgs, target_nonmember_imgs, target_model=None):
     """
     Attack target model using the simplified MIA flow.
 
@@ -601,14 +601,20 @@ def attack_target_model(config, target_member_imgs, target_nonmember_imgs):
 
     # 2. 加载目标模型（核心：攻击的对象）
     print_("\n=== 1/4：加载目标模型 ===")
-    if not os.path.exists(config.TARGET_MODEL_DIR):
-        raise FileNotFoundError(f"目标模型权重文件不存在：{config.TARGET_MODEL_DIR}")
-    target_model = load_fasterrcnn_model(
-        model_path=config.TARGET_MODEL_DIR,
-        num_classes=config.num_classes,
-        device=device
-    )
-    print_(f"✅ 目标模型加载完成：{config.TARGET_MODEL_DIR}")
+    if target_model is None:
+        if not os.path.exists(config.TARGET_MODEL_DIR):
+            raise FileNotFoundError(f"目标模型权重文件不存在：{config.TARGET_MODEL_DIR}")
+        target_model = load_fasterrcnn_model(
+            model_path=config.TARGET_MODEL_DIR,
+            num_classes=config.num_classes,
+            device=device
+        )
+        print_(f"✅ 目标模型加载完成：{config.TARGET_MODEL_DIR}")
+    else:
+        target_model = target_model.to(device)
+        print_("✅ 使用外部传入的目标模型实例")
+
+    target_model.eval()
 
     # 3. 使用 Pipeline 提供的测试样本
     print_("\n=== 2/4：使用 Pipeline 提供的测试样本 ===")
@@ -730,7 +736,13 @@ def attack_target_model(config, target_member_imgs, target_nonmember_imgs):
         print_("✅ 评估完成，结果已输出")
 
 
-def evaluate_attack_with_config(pipeline_config, target_member_imgs, target_nonmember_imgs):
+def evaluate_attack_with_config(
+    pipeline_config,
+    target_member_imgs,
+    target_nonmember_imgs,
+    *,
+    target_model=None,
+):
     """
     Evaluate attack model with configuration from pipeline.
 
@@ -738,6 +750,8 @@ def evaluate_attack_with_config(pipeline_config, target_member_imgs, target_nonm
         pipeline_config: PipelineConfig object from pipeline.py
         target_member_imgs: List of image paths for member samples (TRAIN set)
         target_nonmember_imgs: List of image paths for non-member samples (TEST set)
+        target_model: Optional pre-loaded target model instance. When provided,
+            the attack uses this model directly instead of reloading from disk.
     """
 
     # Create a config-like object
@@ -770,7 +784,12 @@ def evaluate_attack_with_config(pipeline_config, target_member_imgs, target_nonm
     cfg.attack_workers = 0
 
     # Call attack_target_model with config and image paths
-    attack_target_model(cfg, target_member_imgs, target_nonmember_imgs)
+    attack_target_model(
+        cfg,
+        target_member_imgs,
+        target_nonmember_imgs,
+        target_model=target_model,
+    )
 
 
 if __name__ == "__main__":
