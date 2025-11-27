@@ -8,10 +8,6 @@ model:
       network: "fasterrcnn"
       pretrained: false
       trainable_backbone_layers: 3
-  dataset:
-    train_dir: "data/dataset/dior/train"
-    val_dir: "data/dataset/dior/val"
-    test_dir: "data/dataset/dior/test"
   estimator:
     framework: "pytorch"
     task: "detection"

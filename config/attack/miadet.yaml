@@ -1,23 +1,39 @@
 parameters:
   optional:
-    shadow_model: "runs/shadow_train/exp/best.pt"
-    attack_model: "runs/attacker_train/exp/best.pth"
+    TARGET_MODEL_DIR: "fasterrcnn_dior.pt"
+    SHADOW_MODEL_DIR: "runs/shadow_train/exp/best.pt"
+    ATTACK_MODEL_DIR: "runs/attacker_train/exp/best.pth"
+
+    gpu_id: 0
+    workers: 0
     img_size: 640
     num_classes: 20
-    canvas_size: 300
-    max_len: 50
-    log_score: 2
-    canvas_type: "original"
-    normalize_canvas: true
-    attack_epochs: 80
-    attack_batch_size: 32
-    attack_lr: 1.0e-05
-    attack_weight_decay: 0.001
-    attack_model_type: "alex"
+    transform: true
+    save_model: true
+    results_dir: "result"
+    results_file: "result/attack_results.csv"
+
+    SHADOW_EPOCHS: 5
+    SHADOW_BATCH_SIZE: 16
+    SHADOW_LR: 0.001
+    SHADOW_WEIGHT_DECAY: 0.0001
+    SHADOW_USE_PRETRAINED: true
+
+    ATTACK_EPOCHS: 5
+    ATTACK_BATCH_SIZE: 32
+    ATTACK_LR: 1.0e-05
+    ATTACK_WEIGHT_DECAY: 0.001
+    ATTACK_MODEL_TYPE: "alex"
     attack_val_split: 0.2
     attack_patience: 5
-    canvas_save_samples: 0
-    canvas_save_dir: null
-    member_samples: 3000
-    nonmember_samples: 3000
+    TRAIN_SPLIT_RATIO: 0.8
+
+    CANVAS_SIZE: 300
+    MAX_LEN: 50
+    LOG_SCORE: 2
+    CANVAS_TYPE: "original"
+    NORMALIZE_CANVAS: true
+
+    MIA_MEMBER_SAMPLES: 3000
+    MIA_NONMEMBER_SAMPLES: 3000
     device: "auto"
