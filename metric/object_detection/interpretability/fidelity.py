@@ -571,16 +571,16 @@ def run_detection_interpretability(
 
     grad_cam_payload: List[Dict[str, str]] = []
     grad_cam_generator: Optional[GradCamGenerator] = None
-        if gradcam_image_limit > 0:
-            try:
-                grad_cam_generator = GradCamGenerator(
-                    model=model,
-                    device=device,
-                    output_dir=str(local_output_dir),
-                )
-            except Exception as exc:
-                grad_cam_generator = None
-                ResultSender.send_log("警告", f"Grad-CAM 初始化失败：{exc}")
+    if gradcam_image_limit > 0:
+        try:
+            grad_cam_generator = GradCamGenerator(
+                model=model,
+                device=device,
+                output_dir=str(local_output_dir),
+            )
+        except Exception as exc:
+            grad_cam_generator = None
+            ResultSender.send_log("警告", f"Grad-CAM 初始化失败：{exc}")
 
     processed_images = 0
     try:

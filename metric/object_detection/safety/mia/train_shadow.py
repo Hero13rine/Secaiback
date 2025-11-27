@@ -23,7 +23,7 @@ from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN_Res
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import box_iou
 
-from metric.object_detection.interpretability.fidelity import ResultSender
+from utils.SecAISender import ResultSender
 
 # Config will be passed as parameter when called from pipeline
 # For standalone execution, config is imported in __main__
