@@ -105,10 +105,10 @@ def main():
     elif evaluation_type == "generalization":
         if task == "detection":
             convert_cfg = {
-                "src_images": os.getenv("CONVERT_SRC_IMAGES", "/ /app/systemData/evaluation_data/DOTA/test/images"),
-                "src_labels": os.getenv("CONVERT_SRC_LABELS", " /app/systemData/evaluation_data/DOTA/test/labels"),
-                "dst_images": os.getenv("CONVERT_DST_IMAGES", "/app/userData/modelData/data/dota/test"),
-                "dst_labels": os.getenv("CONVERT_DST_LABELS", "/app/userData/modelData/data/dota/test"),
+                "src_images": os.getenv("CONVERT_SRC_IMAGES", "/app/systemData/evaluation_data/DOTA/test/images"),
+                "src_labels": os.getenv("CONVERT_SRC_LABELS", "/app/systemData/evaluation_data/DOTA/test/labels"),
+                "dst_images": os.getenv("CONVERT_DST_IMAGES", "/app/userData/modelData/data/dataset/dota/test"),
+                "dst_labels": os.getenv("CONVERT_DST_LABELS", "/app/userData/modelData/data/dataset/dota/test"),
                 "src_classes": os.getenv("CONVERT_SRC_CLASSES", "/app/systemData/evaluation_data/DOTA/test/dota.txt"),
                 "dst_classes": os.getenv("CONVERT_DST_CLASSES", "/app/userData/modelData/classes.txt"),
             }
@@ -121,8 +121,8 @@ def main():
                     ResultSender.send_log("警告", f"转换数据集标签失败: {exc}")
             # 检测泛化评测
             dataset_loaders = {
-                "source_train": load_data("/app/userData/modelData/data/dior/test"),
-                "target_val": load_data("/app/userData/modelData/data/dota/test"),
+                "source_train": load_data("/app/userData/modelData/data/dataset/dior/test"),
+                "target_val": load_data("/app/userData/modelData/data/dataset/dota/test"),
             }
             evaluate_cross_dataset_generalization(
                 estimator,
