@@ -135,7 +135,11 @@ def main():
 
     elif evaluation_type == "safety":
         from metric.object_detection.safety.mia.evaluate_mia import evaluation_mia_detection as evaluate_mia
-
+        attack_override = evaluation_config["safety"].setdefault("attack_override", {})
+        attack_override.setdefault(
+            "pretrained_model",
+            os.getenv("PRETRAINED_MODEL_PATH", "/app/systemData/pretrained_model/fasterrcnn_resnet50_fpn.pth"),
+        )
         evaluate_mia(train_loader, val_loader, test_loader, evaluation_config["safety"], model,
                                  model_instantiation_config)
     elif evaluation_type == "fairness":
