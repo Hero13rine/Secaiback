@@ -1,12 +1,11 @@
 """目标检测模型的对抗鲁棒性指标."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
-
-import numpy as np
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from metric.object_detection.basic.detection import DetectionSample, ObjectDetectionEvaluator
+from metric.object_detection.robustness.robustUtils import compute_detection_errors
 
 
 # 类型定义
@@ -14,28 +13,46 @@ PredictionLike = Union[DetectionSample, Mapping[str, Sequence[float]]]
 GroundTruthLike = Union[DetectionSample, Mapping[str, Sequence[float]]]
 
 
+# 允许的指标配置（在 evaluate_robustness 中共用）
+SCALAR_ROBUSTNESS_METRICS = frozenset({"map_drop_rate", "miss_rate", "false_detection_rate"})
+PER_CLASS_METRIC_NAME = "per_class_map"
+PER_CLASS_METRIC_ALIASES = frozenset(
+    {"per_class_map", "per_class_ap", "per_class_clean_map", "per_class_adversarial_map"}
+)
+ALL_METRIC_ALIASES = {
+    **{metric: metric for metric in SCALAR_ROBUSTNESS_METRICS},
+    **{alias: PER_CLASS_METRIC_NAME for alias in PER_CLASS_METRIC_ALIASES},
+}
+
+
 @dataclass(frozen=True)
 class RobustnessMetrics:
-    """目标检测鲁棒性指标容器.
-    Attributes:
-    map_drop_rate(float): mAP下降率，表示模型性能下降的程度
-    miss_rate(float): 漏检率，表示未检测到的真实目标比例
-    false_detection_rate(float): 误检率，表示错误检测的比例
+    """目标检测鲁棒性指标容器."""
+
     map_drop_rate: float
     miss_rate: float
     false_detection_rate: float
-"""
+    per_class_clean_map: Mapping[str, float] = field(default_factory=dict)
+    per_class_adversarial_map: Mapping[str, float] = field(default_factory=dict)
+    clean_map: float = 0.0
+    adversarial_map: float = 0.0
+    clean_miss_rate: float = 0.0
+    clean_false_detection_rate: float = 0.0
+
 
 @dataclass(frozen=True)
 class AttackEvaluationResult:
     """对抗攻击评估的结构化结果.
-     Attributes:
+
+    Attributes:
         attack_name (str): 对抗攻击的标识符
-        overall (RotationRobustnessMetrics): 整体鲁棒性指标
+        metrics (RobustnessMetrics): 整体鲁棒性指标
+        metadata (Mapping[str, Any]): 附加的上下文信息, 例如调度参数
     """
 
     attack_name: str
     metrics: RobustnessMetrics
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 class AdversarialRobustnessEvaluator:
@@ -57,6 +74,7 @@ class AdversarialRobustnessEvaluator:
         adversarial_predictions: Sequence[PredictionLike],
         ground_truths: Sequence[GroundTruthLike],
         metrics_to_report: Optional[Iterable[str]] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
     ) -> AttackEvaluationResult:
         """评估单个对抗攻击."""
 
@@ -83,48 +101,91 @@ class AdversarialRobustnessEvaluator:
             raise ValueError("对抗预测数量与真实标注数量不匹配")
 
         print(f"  进度: 计算基线mAP...")
-        base_map = self._compute_map(base_samples, gt_samples)
+        base_map, base_per_class = self._compute_map_with_details(base_samples, gt_samples)
         print(f"  进度: 计算对抗攻击后mAP...")
-        adv_map = self._compute_map(adv_samples, gt_samples)
+        adv_map, adv_per_class = self._compute_map_with_details(adv_samples, gt_samples)
 
-        print(f"  进度: 计算检测错误...")
-        misses, false_positives, gt_count, pred_count = self._compute_detection_errors(
+        print(f"  进度: 计算基线检测错误...")
+        baseline_errors = compute_detection_errors(
+            base_samples,
+            gt_samples,
+            self.iou_threshold,
+        )
+
+        print(f"  进度: 计算对抗检测错误...")
+        adversarial_errors = compute_detection_errors(
             adv_samples,
             gt_samples,
+            self.iou_threshold,
         )
 
         metrics = self._compose_metrics(
+            normalized_metrics,
             base_map,
             adv_map,
-            misses,
-            false_positives,
-            gt_count,
-            pred_count,
-            normalized_metrics,
+            baseline_errors,
+            adversarial_errors,
+            base_per_class,
+            adv_per_class,
         )
 
         print(f"  进度: 攻击 '{attack_name}' 评估完成")
         return AttackEvaluationResult(
             attack_name=attack_name,
             metrics=metrics,
+            metadata=dict(metadata or {}),
         )
 
     def _compose_metrics(
         self,
+        metric_filter: Optional[Mapping[str, None]],
         baseline_map: float,
         adversarial_map: float,
-        misses: int,
-        false_positives: int,
-        ground_truth_total: int,
-        prediction_total: int,
-        metric_filter: Optional[Mapping[str, None]],
+        baseline_errors: Tuple[int, int, int, int],
+        adversarial_errors: Tuple[int, int, int, int],
+        baseline_per_class: Optional[Mapping[str, float]] = None,
+        adversarial_per_class: Optional[Mapping[str, float]] = None,
     ) -> RobustnessMetrics:
         """创建应用可选过滤的指标容器."""
 
         map_drop_rate = self._map_drop(baseline_map, adversarial_map)
-        miss_rate = misses / ground_truth_total if ground_truth_total > 0 else 0.0
+
+        (
+            baseline_misses,
+            baseline_false_positives,
+            baseline_ground_truth_total,
+            baseline_prediction_total,
+        ) = baseline_errors
+        (
+            adversarial_misses,
+            adversarial_false_positives,
+            adversarial_ground_truth_total,
+            adversarial_prediction_total,
+        ) = adversarial_errors
+
+        ground_truth_total = (
+            adversarial_ground_truth_total or baseline_ground_truth_total
+        )
+        prediction_total = (
+            adversarial_prediction_total or baseline_prediction_total
+        )
+
+        miss_rate = (
+            adversarial_misses / ground_truth_total if ground_truth_total > 0 else 0.0
+        )
+        clean_miss_rate = (
+            baseline_misses / baseline_ground_truth_total
+            if baseline_ground_truth_total > 0
+            else 0.0
+        )
+
         false_detection_rate = (
-            false_positives / prediction_total if prediction_total > 0 else 0.0
+            adversarial_false_positives / prediction_total if prediction_total > 0 else 0.0
+        )
+        clean_false_detection_rate = (
+            baseline_false_positives / baseline_prediction_total
+            if baseline_prediction_total > 0
+            else 0.0
         )
 
         metric_values: Dict[str, float] = {
@@ -133,6 +194,10 @@ class AdversarialRobustnessEvaluator:
             "false_detection_rate": false_detection_rate,
         }
 
+        include_per_class_metrics = (
+            metric_filter is None or PER_CLASS_METRIC_NAME in metric_filter
+        )
+
         if metric_filter:
             metric_values = {
                 key: metric_values[key]
@@ -140,10 +205,19 @@ class AdversarialRobustnessEvaluator:
                 if key in metric_filter
             }
 
+        per_class_clean = baseline_per_class if include_per_class_metrics else None
+        per_class_adv = adversarial_per_class if include_per_class_metrics else None
+
         return RobustnessMetrics(
             map_drop_rate=metric_values.get("map_drop_rate", 0.0),
             miss_rate=metric_values.get("miss_rate", 0.0),
             false_detection_rate=metric_values.get("false_detection_rate", 0.0),
+            per_class_clean_map=per_class_clean or {},
+            per_class_adversarial_map=per_class_adv or {},
+            clean_map=baseline_map,
+            adversarial_map=adversarial_map,
+            clean_miss_rate=clean_miss_rate,
+            clean_false_detection_rate=clean_false_detection_rate,
         )
 
     def _compute_map(
@@ -153,32 +227,20 @@ class AdversarialRobustnessEvaluator:
     ) -> float:
         """计算mAP指标."""
 
-        evaluation = self._detector.evaluate(list(predictions), list(ground_truths))
-        details = evaluation.get(self.iou_threshold, {})
-        return float(details.get("map", 0.0))
+        map_value, _ = self._compute_map_with_details(predictions, ground_truths)
+        return map_value
 
-    def _compute_detection_errors(
+    def _compute_map_with_details(
         self,
         predictions: Sequence[DetectionSample],
         ground_truths: Sequence[DetectionSample],
-    ) -> Tuple[int, int, int, int]:
-        """使用贪婪IoU匹配计算漏检和误检."""
+    ) -> Tuple[float, Mapping[str, float]]:
+        """计算mAP并返回逐类AP."""
 
-        misses = 0
-        false_positives = 0
-        total_gt = 0
-        total_predictions = 0
-
-        for pred, gt in zip(predictions, ground_truths):
-            gt_boxes = gt.boxes
-            pred_boxes = pred.boxes
-            total_gt += gt_boxes.shape[0]
-            total_predictions += pred_boxes.shape[0]
-            matches = _greedy_iou_match(pred_boxes, gt_boxes, self.iou_threshold)
-            misses += gt_boxes.shape[0] - len(matches)
-            false_positives += pred_boxes.shape[0] - len(matches)
-
-        return misses, false_positives, total_gt, total_predictions
+        evaluation = self._detector.evaluate(list(predictions), list(ground_truths))
+        details = evaluation.get(self.iou_threshold, {})
+        per_class = self._normalize_per_class(details.get("per_class"))
+        return float(details.get("map", 0.0)), per_class
 
     def _to_samples(
         self,
@@ -201,7 +263,7 @@ class AdversarialRobustnessEvaluator:
         return samples
 
     @staticmethod
-    def _normalize_metric_selection(
+    def _normalize_metric_selection(  # TODO 添加perclass 的参数filter
         metrics_to_report: Optional[Iterable[str]],
     ) -> Optional[Mapping[str, None]]:
         """标准化指标选择."""
@@ -213,8 +275,9 @@ class AdversarialRobustnessEvaluator:
             if not isinstance(name, str):
                 continue
             normalized = name.strip().lower()
-            if normalized in {"map_drop_rate", "miss_rate", "false_detection_rate"}:
-                filtered[normalized] = None
+            canonical = ALL_METRIC_ALIASES.get(normalized)
+            if canonical:
+                filtered[canonical] = None
         return filtered or None
 
     @staticmethod
@@ -226,81 +289,24 @@ class AdversarialRobustnessEvaluator:
         drop = (baseline_map - adversarial_map) / baseline_map
         return float(max(0.0, drop))
 
-
-def _greedy_iou_match(
-    pred_boxes: np.ndarray, gt_boxes: np.ndarray, threshold: float
-) -> List[Tuple[int, int]]:
-    """Greedy IoU matching for axis-aligned boxes."""
-
-    return _greedy_iou_match_generic(
-        pred_boxes, gt_boxes, threshold, _pairwise_iou_axis_aligned
-    )
-
-
-def _greedy_iou_match_generic(
-    pred_boxes: np.ndarray,
-    gt_boxes: np.ndarray,
-    threshold: float,
-    pairwise_iou_fn: Callable[[np.ndarray, np.ndarray], np.ndarray],
-) -> List[Tuple[int, int]]:
-    if pred_boxes.size == 0 or gt_boxes.size == 0:
-        return []
-
-    iou_matrix = pairwise_iou_fn(pred_boxes, gt_boxes)
-    if iou_matrix.size == 0:
-        return []
-
-    matches: List[Tuple[int, int]] = []
-
-    while True:
-        flat_index = int(np.argmax(iou_matrix))
-        best_iou = float(iou_matrix.flat[flat_index])
-        if not np.isfinite(best_iou) or best_iou < threshold or best_iou <= 0.0:
-            break
-        pred_idx, gt_idx = divmod(flat_index, iou_matrix.shape[1])
-        matches.append((pred_idx, gt_idx))
-        iou_matrix[pred_idx, :] = -1.0
-        iou_matrix[:, gt_idx] = -1.0
-
-    return matches
-
-
-def _pairwise_iou_axis_aligned(pred_boxes: np.ndarray, gt_boxes: np.ndarray) -> np.ndarray:
-    """Vectorised pairwise IoU for axis-aligned bounding boxes."""
-
-    if pred_boxes.size == 0 or gt_boxes.size == 0:
-        return np.zeros((pred_boxes.shape[0], gt_boxes.shape[0]), dtype=np.float32)
-
-    pred = np.asarray(pred_boxes, dtype=np.float32).reshape(-1, 4)
-    gt = np.asarray(gt_boxes, dtype=np.float32).reshape(-1, 4)
-
-    pred_exp = pred[:, None, :]
-    gt_exp = gt[None, :, :]
-
-    ix1 = np.maximum(pred_exp[..., 0], gt_exp[..., 0])
-    iy1 = np.maximum(pred_exp[..., 1], gt_exp[..., 1])
-    ix2 = np.minimum(pred_exp[..., 2], gt_exp[..., 2])
-    iy2 = np.minimum(pred_exp[..., 3], gt_exp[..., 3])
-
-    inter_w = np.maximum(ix2 - ix1, 0.0)
-    inter_h = np.maximum(iy2 - iy1, 0.0)
-    intersection = inter_w * inter_h
-
-    pred_area = np.maximum(pred_exp[..., 2] - pred_exp[..., 0], 0.0) * np.maximum(
-        pred_exp[..., 3] - pred_exp[..., 1], 0.0
-    )
-    gt_area = np.maximum(gt_exp[..., 2] - gt_exp[..., 0], 0.0) * np.maximum(
-        gt_exp[..., 3] - gt_exp[..., 1], 0.0
-    )
-    union = pred_area + gt_area - intersection
-    union = np.maximum(union, np.finfo(np.float32).eps)
-
-    return (intersection / union).astype(np.float32)
-
+    @staticmethod
+    def _normalize_per_class(per_class_payload: Any) -> Mapping[str, float]:
+        if not isinstance(per_class_payload, Mapping):
+            return {}
+        normalized: Dict[str, float] = {}
+        for key, value in per_class_payload.items():
+            try:
+                normalized[str(key)] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return normalized
 
 __all__ = [
     "AttackEvaluationResult",
     "AdversarialRobustnessEvaluator",
     "PredictionLike",
     "RobustnessMetrics",
+    "ALL_METRIC_ALIASES",
+    "PER_CLASS_METRIC_NAME",
+    "SCALAR_ROBUSTNESS_METRICS",
 ]

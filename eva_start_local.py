@@ -18,12 +18,14 @@ from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
 from tests.fasterrcnn.load_dataset import load_data
 from utils.sender import ConsoleResultSender as ResultSender
+from utils.convert import convert_with_config
+from metric.object_detection.generaliazation.generaliazation import evaluate_cross_dataset_generalization
 
 def main():
     user_id = "local_user"  # 本地调试时使用固定的用户ID
     model_id = "local_model"  # 本地调试时使用固定的模型ID
-    evaluation_type = "basic"  # 本地调试时使用固定的评测维度 
-    evaluation_path = "secai-common/config/user/model_pytorch_det_fasterrcnn_fairness"  # 本地调试时使用本地配置文件路径
+    evaluation_type = "generalization"  # 本地调试时使用固定的评测维度 
+    evaluation_path = "/wkm/secai/secai-common/config/user/model_pytorch_det_fasterrcnn_fairness.yaml"  # 本地调试时使用本地配置文件路径
 
     # 1.加载配置文件
     user_config = load_config(evaluation_path)
@@ -55,7 +57,7 @@ def main():
     ResultSender.send_log("进度", "估计器已生成")
 
     # 5.加载数据
-    test_loader = load_data()
+    test_loader = load_data("/wkm/data/dior/test/test")
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
@@ -67,8 +69,30 @@ def main():
     #     evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
     # elif evaluation_type == "interpretability":
     #     GradientShap(model, test_loader)
-    # elif evaluation_type == "generalization":
-    #     evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])    
+    elif evaluation_type == "generalization":
+        if task == "detection":
+            convert_cfg = {
+                "src_images": os.getenv("CONVERT_SRC_IMAGES", "/wkm/data/dota/DOTA/test/images"),
+                "src_labels": os.getenv("CONVERT_SRC_LABELS", "/wkm/data/dota/DOTA/test/labels"),
+                "dst_images": os.getenv("CONVERT_DST_IMAGES", "/wkm/data/dota_dior/test"),
+                "dst_labels": os.getenv("CONVERT_DST_LABELS", "/wkm/data/dota_dior/test"),
+                "src_classes": os.getenv("CONVERT_SRC_CLASSES", "/wkm/data/dota.txt"),
+                "dst_classes": os.getenv("CONVERT_DST_CLASSES", "/wkm/data/dior.txt"),
+            }
+            if all(convert_cfg.values()):
+                try:
+                    ResultSender.send_log("进度", "开始转换 DOTA 标签")
+                    convert_with_config(convert_cfg)
+                    ResultSender.send_log("进度", "DOTA 标签转换完成")
+                except Exception as exc:
+                    ResultSender.send_log("警告", f"转换 DOTA 标签失败: {exc}")
+            else:
+                ResultSender.send_log("提示", "未配置 DOTA 转换路径，跳过标签转换")
+        dataset_loaders = {
+            "source_train": load_data("/wkm/data/dior/test/test"),
+            "target_val": load_data("/wkm/data/dota_dior/test"),
+        }
+        evaluate_cross_dataset_generalization(estimator, dataset_loaders, evaluation_config["generalization"].get("generalization_testing"))    
     elif evaluation_type == "fairness":
         calculate_fairness_metrics(estimator, test_loader, evaluation_config["fairness"])
     ResultSender.send_log("进度", "评测结束")

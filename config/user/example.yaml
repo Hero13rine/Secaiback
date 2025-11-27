@@ -55,27 +55,52 @@ evaluation:
   basic:
     performance_testing:               # 基础性能测试
       metrics:                         # 性能测试指标列表
-        - accuracyD
-        - precision
-        - recall
-        - f1score
+        # (det_optional)
+        - map/map_50/accuracy/map50/map@50  # mAP （任何形式传入都可以）
+        #- map_5095                    # mAP在不同IoU阈值下的平均值
+        - per_class_ap                 # 每个类别的平均精度
+        - precision                    # 精确率
+        - recall                       # 召回率
       performance_testing_config:      # 性能测试配置参数
         -
   robustness:
-    adversarial:                       # 对抗鲁棒性测试
-      metrics:                         # 对抗攻击评估指标列表
-        -
-      attacks:                         # 对抗攻击配置  可选(下方参数，使用什么攻击就用填写对应的攻击名称）
-        fgsm:                          # FGSM攻击方法配置
-          parameters:                  # FGSM攻击参数
-        pgd:                           # PGD攻击方法配置
-          parameters:                  # PGD攻击参数
-              eps: 0.03                # 扰动强度参数
-    corruption:                        # 数据损坏鲁棒性测试
-      metrics:                         # 数据损坏评估指标列表
-        -
-      corruption_config:               # 数据损坏测试配置
-        -
+    adversarial:                       # adversarial robustness
+      metrics:                         # metrics requested for adversarial testing
+        # (det_optional)
+        - map_drop_rate                # mAP 下降率
+        - miss_rate                    # 漏检率
+        - false_detection_rate         # 误检率
+        - per_class_ap                 # 每个类别的clean map和鲁棒 map
+      attacks:
+        # (det_optional)
+        fgsm: # FGSM攻击
+          parameters:
+           # (det_requied)
+            eps: # 迭代 eps 调度
+              start: 0.001             # 起始 eps
+              end: 0.01                # 结束 eps
+              step: 0.002              # 每次增加幅度
+            # 也可以写成列表: eps: [0.001, 0.01, 0.002]
+          pgd: # PGD攻击
+         # (det_requied)
+            parameters:
+              steps: # pgd攻击的迭代步数
+                start: 10                # 初始迭代步数
+                end: 100                 # 结束迭代步数
+                step: 10                 # 每次迭代步数增加幅度
+              # 也可以写成列表: steps: [10, 100, 10]
+    corruption:                        # 扰动攻击鲁棒性测试
+      metrics:                         # 扰动攻击评估指标列表
+        # (det_optional)
+        - perturbation_magnitude       # 扰动幅度：衡量扰动的幅度大小
+        - performance_drop_rate        # 性能下降率：衡量由于扰动导致的性能下降比率 本质就是map下降率
+        - perturbation_tolerance       # 扰动容错：衡量模型对扰动的容忍程度
+      corruptions:                     # 扰动攻击方法
+        # (det_optional)
+        - gaussian_noise               # 高斯噪声 - 向图像添加标准的加性高斯噪声
+        - gaussian_blur                # 高斯模糊 - 使用可调节核大小的高斯模糊
+        - brightness_shift             # 亮度偏移 - 对每张图像应用均匀的亮度偏移
+        - contrast_shift               # 对比度变化 - 线性对比度缩放
   interpretability:
     interpretability_testing:          # 可解释性测试
       metrics:                         # 可解释性评估指标列表
