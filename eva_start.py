@@ -76,7 +76,10 @@ def main():
     ResultSender.send_log("进度", "估计器已生成")
 
     # 5.加载数据
-    test_loader = load_data()
+    if evaluation_type == "safety":
+        train_loader, val_loader, test_loader = load_data()
+    else:
+        test_loader = load_data()
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
@@ -98,16 +101,7 @@ def main():
             from metric.classification.robustness.evaluate_robustness import evaluation_robustness
             evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
     elif evaluation_type == "interpretability":
-        if task == "detection":
-            from metric.object_detection.interpretability.fidelity import run_detection_interpretability
-            run_detection_interpretability(
-                model,
-                estimator,
-                test_loader,
-                evaluation_config=evaluation_config["interpretability"],
-            )
-        else:
-            GradientShap(model, test_loader)
+        GradientShap(model, test_loader)
     elif evaluation_type == "generalization":
         if task == "detection":
             convert_cfg = {
@@ -138,7 +132,12 @@ def main():
         else:
             # 分类泛化评测
             evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
-    
+
+    elif evaluation_type == "safety":
+        from metric.object_detection.safety.mia.evaluate_mia import evaluation_mia_detection as evaluate_mia
+
+        evaluate_mia(train_loader, val_loader, test_loader, evaluation_config["safety"], model,
+                                 model_instantiation_config)
     elif evaluation_type == "fairness":
             if task == "detection":
                 from metric.object_detection.fairness import evaluate_fairness_detection
