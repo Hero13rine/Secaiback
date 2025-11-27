@@ -11,8 +11,8 @@ from metric.object_detection.basic.detection import (
     DetectionSample,
     ObjectDetectionEvaluator,
 )
-from utils.sender import ConsoleResultSender as ResultSender
-# from utils.SecAISender import ResultSender
+# from utils.sender import ConsoleResultSender as ResultSender
+from utils.SecAISender import ResultSender
 
 @dataclass
 class DatasetEvaluationResult:
