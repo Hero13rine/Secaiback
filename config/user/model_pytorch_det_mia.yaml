@@ -15,6 +15,7 @@ model:
       input_shape: [3, 640, 640]
       nb_classes: 20
       device_type: "gpu"
+      clip_values: [0, 1]
 evaluation:
   safety:
     membership_inference_detection: ["mia_det"]

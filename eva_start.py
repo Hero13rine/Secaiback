@@ -71,7 +71,10 @@ def main():
     ResultSender.send_log("进度", "估计器已生成")
 
     # 5.加载数据
-    test_loader = load_data()
+    if evaluation_type == "safety":
+        train_loader, val_loader, test_loader = load_data()
+    else:
+        test_loader = load_data()
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
@@ -96,7 +99,11 @@ def main():
         GradientShap(model, test_loader)
     elif evaluation_type == "generalization":
         evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
-    
+    elif evaluation_type == "safety":
+        from metric.object_detection.safety.mia.evaluate_mia import evaluation_mia_detection as evaluate_mia
+
+        evaluate_mia(train_loader, val_loader, test_loader, evaluation_config["safety"], model,
+                                 model_instantiation_config)
     elif evaluation_type == "fairness":
             if task == "detection":
                 from metric.object_detection.fairness import evaluate_fairness_detection

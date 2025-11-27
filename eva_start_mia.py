@@ -19,7 +19,7 @@ def main():
     user_id = "local_user"  # 本地调试时使用固定的用户ID
     model_id = "local_model"  # 本地调试时使用固定的模型ID
     evaluation_type = "fairness"  # 本地调试时使用固定的评测维度
-    evaluation_path = "secai-common/config/user/model_pytorch_det_fasterrcnn_mia"  # 本地调试时使用本地配置文件路径
+    evaluation_path = "secai-common/config/user/model_pytorch_det_mia.yaml"  # 本地调试时使用本地配置文件路径
 
     # 1.加载配置文件
     user_config = load_config(evaluation_path)
@@ -58,7 +58,7 @@ def main():
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
-    evaluation_mia_detection(estimator, train_loader, val_loader, test_loader, evaluation_config["safety"])
+    evaluation_mia_detection(train_loader, val_loader, test_loader, evaluation_config["safety"], model, model_instantiation_config)
 
     ResultSender.send_log("进度", "评测结束")
 

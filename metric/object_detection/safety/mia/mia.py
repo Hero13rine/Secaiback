@@ -8,7 +8,7 @@ import torch.nn as nn
 from importlib import import_module
 import glob
 from tqdm import tqdm
-from utils.sender import ResultSender
+from utils.SecAISender import ResultSender
 # ===============================================================
 # ✅ 兼容 PyTorch 2.6 的 torch.load 安全模式问题
 # ===============================================================

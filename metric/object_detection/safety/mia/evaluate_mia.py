@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 from typing import Any, Mapping
 
+from utils.SecAISender import ResultSender
+
 from .pipeline import (
     load_pipeline_config,
     step2_train_shadow,
@@ -57,14 +59,20 @@ def evaluation_mia_detection(
     model_instantiation = copy.deepcopy(model_instantiation or {})
     cfg = _prepare_pipeline_config(evaluation_config, model_instantiation)
 
+    ResultSender.send_log("进度", "开始训练影子模型")
     step2_train_shadow(cfg, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader)
+    ResultSender.send_log("进度", "影子模型训练完成")
+    ResultSender.send_log("进度", "开始执行攻击模型")
     step3_train_attack(cfg, train_loader=train_loader, test_loader=test_loader)
+    ResultSender.send_log("进度", "攻击模型完成")
+    ResultSender.send_log("进度", "开始评估")
     step4_evaluate(
         cfg,
         train_loader=train_loader,
         test_loader=test_loader,
         target_model=target_model,
     )
+    ResultSender.send_log("进度", "MIA评估完成")
 
 
 __all__ = ["evaluation_mia_detection"]
