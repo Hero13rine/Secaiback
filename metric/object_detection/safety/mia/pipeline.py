@@ -13,8 +13,8 @@ import os
 import time
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any, Mapping
-
+from typing import Any, Mapping, List
+from pathlib import Path
 from method import load_config
 
 from .atk import train_attack_with_config
@@ -22,8 +22,9 @@ from .mia import evaluate_attack_with_config
 from .train_shadow import train_shadow_with_config
 
 
-DEFAULT_CONFIG_PATH = "config/attack/miadet.yaml"
-
+DEFAULT_CONFIG_PATH = str(
+    Path(__file__).resolve().parents[4] / "config/attack/miadet.yaml"
+)
 
 def _load_base_config(path: str | None) -> Mapping[str, Any]:
     """Load base parameters from the miadet YAML file."""
