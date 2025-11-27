@@ -76,7 +76,10 @@ def main():
     ResultSender.send_log("进度", "估计器已生成")
 
     # 5.加载数据
-    test_loader = load_data()
+    if evaluation_type == "safety":
+        train_loader, val_loader, test_loader = load_data()
+    else:
+        test_loader = load_data()
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
@@ -98,23 +101,14 @@ def main():
             from metric.classification.robustness.evaluate_robustness import evaluation_robustness
             evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
     elif evaluation_type == "interpretability":
-        if task == "detection":
-            from metric.object_detection.interpretability.fidelity import run_detection_interpretability
-            run_detection_interpretability(
-                model,
-                estimator,
-                test_loader,
-                evaluation_config=evaluation_config["interpretability"],
-            )
-        else:
-            GradientShap(model, test_loader)
+        GradientShap(model, test_loader)
     elif evaluation_type == "generalization":
         if task == "detection":
             convert_cfg = {
-                "src_images": os.getenv("CONVERT_SRC_IMAGES", "/ /app/systemData/evaluation_data/DOTA/test/images"),
-                "src_labels": os.getenv("CONVERT_SRC_LABELS", " /app/systemData/evaluation_data/DOTA/test/labels"),
-                "dst_images": os.getenv("CONVERT_DST_IMAGES", "/app/userData/modelData/data/dota/test"),
-                "dst_labels": os.getenv("CONVERT_DST_LABELS", "/app/userData/modelData/data/dota/test"),
+                "src_images": os.getenv("CONVERT_SRC_IMAGES", "/app/systemData/evaluation_data/DOTA/test/images"),
+                "src_labels": os.getenv("CONVERT_SRC_LABELS", "/app/systemData/evaluation_data/DOTA/test/labels"),
+                "dst_images": os.getenv("CONVERT_DST_IMAGES", "/app/userData/modelData/data/dataset/dota/test"),
+                "dst_labels": os.getenv("CONVERT_DST_LABELS", "/app/userData/modelData/data/dataset/dota/test"),
                 "src_classes": os.getenv("CONVERT_SRC_CLASSES", "/app/systemData/evaluation_data/DOTA/test/dota.txt"),
                 "dst_classes": os.getenv("CONVERT_DST_CLASSES", "/app/userData/modelData/classes.txt"),
             }
@@ -127,8 +121,8 @@ def main():
                     ResultSender.send_log("警告", f"转换数据集标签失败: {exc}")
             # 检测泛化评测
             dataset_loaders = {
-                "source_train": load_data("/app/userData/modelData/data/dior/test"),
-                "target_val": load_data("/app/userData/modelData/data/dota/test"),
+                "source_train": load_data("/app/userData/modelData/data/dataset/dior/test"),
+                "target_val": load_data("/app/userData/modelData/data/dataset/dota/test"),
             }
             evaluate_cross_dataset_generalization(
                 estimator,
@@ -138,7 +132,12 @@ def main():
         else:
             # 分类泛化评测
             evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
-    
+
+    elif evaluation_type == "safety":
+        from metric.object_detection.safety.mia.evaluate_mia import evaluation_mia_detection as evaluate_mia
+
+        evaluate_mia(train_loader, val_loader, test_loader, evaluation_config["safety"], model,
+                                 model_instantiation_config)
     elif evaluation_type == "fairness":
             if task == "detection":
                 from metric.object_detection.fairness import evaluate_fairness_detection

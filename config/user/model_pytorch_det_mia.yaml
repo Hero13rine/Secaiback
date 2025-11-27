@@ -1,0 +1,21 @@
+model:
+  instantiation:
+    model_path: "fasterrcnn_test/model.py"
+    model_name: "TorchvisionDetector"
+    weight_path: "fasterrcnn_test/dior_clean_best.pt"
+    parameters:
+      num_classes: 20
+      network: "fasterrcnn"
+      pretrained: false
+      trainable_backbone_layers: 3
+  estimator:
+    framework: "pytorch"
+    task: "detection"
+    parameters:
+      input_shape: [3, 640, 640]
+      nb_classes: 20
+      device_type: "gpu"
+      clip_values: [0, 1]
+evaluation:
+  safety:
+    membership_inference_detection: ["mia_det"]
