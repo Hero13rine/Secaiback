@@ -16,7 +16,7 @@ def main():
     user_id = "local_user"  # 本地调试时使用固定的用户ID
     model_id = "local_model"  # 本地调试时使用固定的模型ID
     evaluation_type = "fairness"  # 本地调试时使用固定的评测维度
-    evaluation_path = "secai-common/config/user/model_pytorch_det_fasterrcnn_mia"  # 本地调试时使用本地配置文件路径
+    evaluation_path = "config/user/model_pytorch_det_mia.yaml"  # 本地调试时使用本地配置文件路径
 
     # 1.加载配置文件
     user_config = load_config(evaluation_path)

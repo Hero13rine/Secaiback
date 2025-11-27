@@ -13,13 +13,13 @@ parameters:
     results_dir: "result"
     results_file: "result/attack_results.csv"
 
-    SHADOW_EPOCHS: 30
+    SHADOW_EPOCHS: 5
     SHADOW_BATCH_SIZE: 16
     SHADOW_LR: 0.001
     SHADOW_WEIGHT_DECAY: 0.0001
     SHADOW_USE_PRETRAINED: true
 
-    ATTACK_EPOCHS: 80
+    ATTACK_EPOCHS: 5
     ATTACK_BATCH_SIZE: 32
     ATTACK_LR: 1.0e-05
     ATTACK_WEIGHT_DECAY: 0.001
