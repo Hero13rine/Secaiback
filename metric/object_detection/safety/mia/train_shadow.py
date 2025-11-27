@@ -23,6 +23,7 @@ from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN_Res
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import box_iou
 
+from metric.object_detection.interpretability.fidelity import ResultSender
 
 # Config will be passed as parameter when called from pipeline
 # For standalone execution, config is imported in __main__
@@ -236,7 +237,7 @@ def train_shadow_finetune(cfg):
             if not os.path.exists(pretrained_path):
                 raise FileNotFoundError(f"Pretrained model not found: {pretrained_path}")
 
-            print(f"Using local pretrained weights: {pretrained_path}")
+            ResultSender.send_log("进度",f"Using local pretrained weights: {pretrained_path}")
             model = fasterrcnn_resnet50_fpn(weights=None)
             state_dict = torch.load(pretrained_path, map_location=device)
             missing, unexpected = model.load_state_dict(state_dict, strict=False)
