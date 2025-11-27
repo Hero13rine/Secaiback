@@ -17,7 +17,12 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 import torch
-from guided_filter_pytorch.guided_filter import GuidedFilter
+
+# guided_filter_pytorch is optional; skip guided filtering if not installed.
+try:
+    from guided_filter_pytorch.guided_filter import GuidedFilter
+except ImportError:  # pragma: no cover - optional dependency
+    GuidedFilter = None
 from scipy.ndimage import gaussian_filter
 
 # 远程/本地 Sender 自动切换：本地调试前需设置 `set LOCAL_SENDER=1`
@@ -297,7 +302,7 @@ class GradCamGenerator:
         self.output_dir = output_dir
         self.alpha = alpha
         self.blur_sigma = blur_sigma
-        self.use_guided_filter = use_guided_filter
+        self.use_guided_filter = use_guided_filter and GuidedFilter is not None
         self.gamma = gamma
         self.roi_pool = getattr(self.model.roi_heads, "box_roi_pool", None)
         if self.roi_pool is None:
@@ -434,6 +439,8 @@ class GradCamGenerator:
         return self._normalize(canvas)
 
     def _guided_filter(self, rgb_image: np.ndarray, cam: np.ndarray) -> np.ndarray:
+        if GuidedFilter is None:
+            return cam
         gray = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
         gray_t = torch.from_numpy(gray).unsqueeze(0).unsqueeze(0)
         cam_t = torch.from_numpy(cam).unsqueeze(0).unsqueeze(0)
@@ -564,16 +571,16 @@ def run_detection_interpretability(
 
     grad_cam_payload: List[Dict[str, str]] = []
     grad_cam_generator: Optional[GradCamGenerator] = None
-    if gradcam_image_limit > 0:
-        try:
-            grad_cam_generator = GradCamGenerator(
-                model=model,
-                device=device,
-                output_dir=str(local_output_dir),
-            )
-        except Exception as exc:
-            grad_cam_generator = None
-            ResultSender.send_log("警告", f"Grad-CAM 初始化失败：{exc}")
+        if gradcam_image_limit > 0:
+            try:
+                grad_cam_generator = GradCamGenerator(
+                    model=model,
+                    device=device,
+                    output_dir=str(local_output_dir),
+                )
+            except Exception as exc:
+                grad_cam_generator = None
+                ResultSender.send_log("警告", f"Grad-CAM 初始化失败：{exc}")
 
     processed_images = 0
     try:
