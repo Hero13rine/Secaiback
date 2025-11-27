@@ -102,12 +102,12 @@ def main():
     elif evaluation_type == "generalization":
         if task == "detection":
             convert_cfg = {
-                "src_images": os.getenv("CONVERT_SRC_IMAGES", "/wkm/data/dota/DOTA/test/images"),
-                "src_labels": os.getenv("CONVERT_SRC_LABELS", "/wkm/data/dota/DOTA/test/labels"),
-                "dst_images": os.getenv("CONVERT_DST_IMAGES", "/wkm/data/dota_dior/test"),
-                "dst_labels": os.getenv("CONVERT_DST_LABELS", "/wkm/data/dota_dior/test"),
-                "src_classes": os.getenv("CONVERT_SRC_CLASSES", "/wkm/data/dota.txt"),
-                "dst_classes": os.getenv("CONVERT_DST_CLASSES", "/wkm/data/dior.txt"),
+                "src_images": os.getenv("CONVERT_SRC_IMAGES", "/ /app/systemData/evaluation_data/DOTA/test/images"),
+                "src_labels": os.getenv("CONVERT_SRC_LABELS", " /app/systemData/evaluation_data/DOTA/test/labels"),
+                "dst_images": os.getenv("CONVERT_DST_IMAGES", "/app/userData/modelData/data/dota/test"),
+                "dst_labels": os.getenv("CONVERT_DST_LABELS", "/app/userData/modelData/data/dota/test"),
+                "src_classes": os.getenv("CONVERT_SRC_CLASSES", "/app/systemData/evaluation_data/DOTA/test/dota.txt"),
+                "dst_classes": os.getenv("CONVERT_DST_CLASSES", "/app/userData/modelData/classes.txt"),
             }
             if all(convert_cfg.values()):
                 try:
@@ -118,8 +118,8 @@ def main():
                     ResultSender.send_log("警告", f"转换数据集标签失败: {exc}")
             # 检测泛化评测
             dataset_loaders = {
-                "source_train": load_data("/wkm/data/dior/test/test"),
-                "target_val": load_data("/wkm/data/dota_dior/test"),
+                "source_train": load_data("/app/userData/modelData/data/test"),
+                "target_val": load_data("/app/userData/modelData/data/dota/test"),
             }
             evaluate_cross_dataset_generalization(
                 estimator,
