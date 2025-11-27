@@ -118,7 +118,7 @@ def main():
                     ResultSender.send_log("警告", f"转换数据集标签失败: {exc}")
             # 检测泛化评测
             dataset_loaders = {
-                "source_train": load_data("/app/userData/modelData/data/test"),
+                "source_train": load_data("/app/userData/modelData/data/dior/test"),
                 "target_val": load_data("/app/userData/modelData/data/dota/test"),
             }
             evaluate_cross_dataset_generalization(
