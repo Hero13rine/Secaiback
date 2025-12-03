@@ -2,7 +2,7 @@
 model:
   instantiation:
     model_path: "fasterrcnn_test/model_builtin.py"
-    weight_path: ""  # Ϊ����ʹ��torchvisionԤѵ����������ѵȨ�ؿ���·��
+    weight_path: ""  # ΪʹtorchvisionԤѵѵȨؿ·
     model_name: "fasterrcnn_resnet50_fpn"
     parameters:
       "num_classes": 20
@@ -18,20 +18,10 @@ model:
       device: "cuda"
       device_type: "gpu"
       batch_size: 1
+
 evaluation:
   # basic: ["map", "accuracy", "precision"]
   interpretability:
-    model_fidelity:
-      score_threshold: 0.3
-      topk: 5
-      match_iou: 0.5
-      perturbation: blur
-      keep_mask_outside: true
-      grad_cam:
-        output_dir: "outputs/fidelity_gradcam"
-        class_names_path: "fasterrcnn_test/classes.txt"
-        max_examples: 3
-        #只有 keep/drop 同时达到设定阈值的检测才会触�?Grad-CAM
-        min_keep_ratio: 0.85
-        min_drop_ratio: 0.75
-        score_threshold: 0.4    #触发热力图的最低原始置信度
+    interpretability_testing:
+      metrics:
+        - grad_cam
