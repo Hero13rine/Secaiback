@@ -17,6 +17,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 import torch
+import yaml
 
 # guided_filter_pytorch is optional; skip guided filtering if not installed.
 try:
@@ -42,6 +43,9 @@ else:
     ResultSender = RemoteSender
 
 
+DEFAULT_INTERPRETABILITY_PARAMETER_CONFIG = Path("config/attack/interpretability.yaml")
+
+
 @dataclass
 class _FidelityRecord:
     """Internal record for fidelity scores."""
@@ -62,6 +66,17 @@ class FidelitySummary:
     keep_std: float
     drop_mean: float
     drop_std: float
+
+
+def _load_interpretability_attack_config(config_path: Path) -> Dict:
+    """Load perturbation-based interpretability defaults from YAML."""
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+    except FileNotFoundError:
+        ResultSender.send_log("警告", f"未找到可解释性配置文件: {config_path}")
+        return {}
 
 
 class DetectionFidelityMeter:
@@ -538,9 +553,24 @@ def run_detection_interpretability(
     Run fidelity and optional Grad-CAM evaluation for detection models.
     """
 
-    fidelity_cfg = {}
+    metrics_selection: Sequence[str] = ()
+    config_path = DEFAULT_INTERPRETABILITY_PARAMETER_CONFIG
     if isinstance(evaluation_config, dict):
-        fidelity_cfg = evaluation_config.get("model_fidelity", evaluation_config) or {}
+        attribution_cfg = (
+            evaluation_config.get("interpretability_testing")
+            or evaluation_config.get("attribution testing")
+            or evaluation_config
+        )
+        metrics_selection = attribution_cfg.get("metrics", ())
+        config_override = attribution_cfg.get("config_path")
+        if isinstance(config_override, (str, Path)):
+            config_path = Path(config_override)
+
+    fidelity_raw_cfg = _load_interpretability_attack_config(config_path)
+    fidelity_cfg = fidelity_raw_cfg.get("model_fidelity", fidelity_raw_cfg)
+    if isinstance(evaluation_config, dict) and not fidelity_cfg:
+        fidelity_cfg = evaluation_config.get("model_fidelity", {})
+
     score_threshold = float(fidelity_cfg.get("score_threshold", score_threshold))
     topk = int(fidelity_cfg.get("topk", topk))
     iou_match_threshold = float(fidelity_cfg.get("match_iou", 0.5))
@@ -548,6 +578,9 @@ def run_detection_interpretability(
     keep_mask_outside = bool(fidelity_cfg.get("keep_mask_outside", True))
     grad_cfg = fidelity_cfg.get("grad_cam") or {}
     gradcam_image_limit = int(grad_cfg.get("max_examples", gradcam_image_limit))
+    enable_grad_cam = True if not metrics_selection else ("grad_cam" in metrics_selection)
+    if not enable_grad_cam:
+        gradcam_image_limit = 0
 
     evaluate_metric = os.getenv("evaluateDimension") or "interpretability"
     result_root = os.getenv("resultPath")

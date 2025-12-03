@@ -106,19 +106,18 @@ evaluation:
         - brightness_shift             # 亮度偏移 - 对每张图像应用均匀的亮度偏移
         - contrast_shift               # 对比度变化 - 线性对比度缩放
   interpretability:
-    interpretability_testing:          # 可解释性测试
-      metrics:                         # 可解释性评估指标列表
-        -
+      attribution testing:             # 归因测试
+        metrics:                       # 可解释性评估指标列表
+          - grad_cam
   safety:
-      membership_inference_detection:
+      membership_inference_detection: # 目标检测任务的成员推理攻击
         metrics:
           - membership_inference_asr # 安全性测试如果选择就这个格式
-
   generalization:
     generalization_testing:            # 泛化能力测试
       metrics:                         # 泛化能力评估指标列表
-        -
+        - gap_pairs
   fairness:
-    fairness_testing:                 # 公平性测试
+    individual_group_fairness:        # 公平性测试
       metrics:                        # 公平性评估指标列表
         - performance_gap
