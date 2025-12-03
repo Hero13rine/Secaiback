@@ -34,6 +34,10 @@ model:
       # 示例（检测）：
       #   num_classes: 20
       #   network: "fasterrcnn"
+      "num_classes": 20             # 你的前景类别数
+      "network": "fasterrcnn"
+      "pretrained": False             # 用 ImageNet 预训练骨干初始化
+      "trainable_backbone_layers": 3  # 可按需改 2~5
   estimator:
     framework: "pytorch"                        # 与 `config/estimator/pytorch/*` 配置文件匹配
     task: "classification"                      # 对于检测模型，更改为 "object_detection"
@@ -106,9 +110,10 @@ evaluation:
       metrics:                         # 可解释性评估指标列表
         -
   safety:
-    membership_inference:              # 安全性测试 - 成员推理攻击
-      metrics:                         # 成员推理攻击评估指标列表
-        -
+      membership_inference_detection:
+        metrics:
+          - membership_inference_asr # 安全性测试如果选择就这个格式
+
   generalization:
     generalization_testing:            # 泛化能力测试
       metrics:                         # 泛化能力评估指标列表

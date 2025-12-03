@@ -18,4 +18,6 @@ model:
       clip_values: [0, 1]
 evaluation:
   safety:
-    membership_inference_detection: ["mia_det"]
+    membership_inference_detection:
+      metrics:
+        - membership_inference_asr

@@ -55,9 +55,14 @@ def evaluation_mia_detection(
     model instance should also be supplied by the caller so it can be evaluated
     directly without reloading from disk.
     """
-
+    # ``eva_start_mia`` passes the full ``evaluation["safety"]`` section.
+    # Extract the MIA-specific configuration while remaining backwards
+    # compatible with callers that already pass the nested section directly.
+    mia_config = evaluation_config.get(
+        "membership_inference_detection", evaluation_config
+    )
     model_instantiation = copy.deepcopy(model_instantiation or {})
-    cfg = _prepare_pipeline_config(evaluation_config, model_instantiation)
+    cfg = _prepare_pipeline_config(mia_config, model_instantiation)
 
     ResultSender.send_log("进度", "开始训练影子模型")
     step2_train_shadow(cfg, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader)
