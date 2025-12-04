@@ -1,4 +1,9 @@
 from __future__ import annotations
+
+"""
+Unified data loading module for MIA detection project.
+This is the ONLY source for dataset loading and path management.
+"""
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
@@ -8,6 +13,13 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 import torchvision.transforms.functional as TF
+
+# ============================================================================
+# DEFAULT DATA PATHS - Centralized data path configuration
+# ============================================================================
+DEFAULT_TRAIN_DIR = './data/dataset/dior/train'  # Target model's training data
+DEFAULT_VAL_DIR = './data/dataset/dior/val'  # Shadow model's non-member samples
+DEFAULT_TEST_DIR = './data/dataset/dior/test'  # Shadow model's training data
 
 
 def _find_image_files(root: Path) -> List[Path]:
@@ -134,29 +146,70 @@ def collate_fn(batch):
 
 
 def load_data(
-    root: str | Path,
-    batch_size: int = 2,
-    shuffle: bool = False,
-    num_workers: int = 2,
-    augment: bool = False
-) -> DataLoader:
+        train_root: str | Path = None,
+        val_root: str | Path = None,
+        test_root: str | Path = None,
+        batch_size: int = 2,
+        num_workers: int = 0,
+        augment_train: bool = True
+) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
-    Create a DataLoader for evaluation/testing (or quick sanity-check training).
+    Load train/val/test datasets for MIA (Membership Inference Attack) experiments.
+
+    The new DIOR dataset structure:
+        - ./data/dataset/dior/train  : training images and labels
+        - ./data/dataset/dior/val    : validation images and labels
+        - ./data/dataset/dior/test   : test images and labels
+
     Args:
-        root: dataset root directory; allows <root>/images and <root>/labels, or flat layout (*.jpg + *.txt).
-        batch_size: batch size.
-        shuffle: shuffle samples (commonly False for test/val).
-        num_workers: number of workers for loading.
-        augment: enable simple augmentation (currently horizontal flip).
+        train_root: path to training set directory (None = use DEFAULT_TRAIN_DIR)
+        val_root: path to validation set directory (None = use DEFAULT_VAL_DIR)
+        test_root: path to test set directory (None = use DEFAULT_TEST_DIR)
+        batch_size: batch size for all dataloaders
+        num_workers: number of workers for data loading
+        augment_train: whether to apply augmentation to training data
+
     Returns:
-        test_dataloader: torch.utils.data.DataLoader
+        train_loader, val_loader, test_loader: DataLoaders for each split
     """
-    dataset = ObjDataset(root, augment=augment)
-    test_dataloader = DataLoader(
-        dataset,
+    # Use default paths if not provided
+    train_root = train_root or DEFAULT_TRAIN_DIR
+    val_root = val_root or DEFAULT_VAL_DIR
+    test_root = test_root or DEFAULT_TEST_DIR
+
+    # Create datasets
+    train_dataset = ObjDataset(train_root, augment=augment_train)
+    val_dataset = ObjDataset(val_root, augment=False)
+    test_dataset = ObjDataset(test_root, augment=False)
+
+    print(f"Dataset sizes - Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}")
+
+    # Create dataloaders
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
+        shuffle=True,
         num_workers=num_workers,
         collate_fn=collate_fn
     )
-    return test_dataloader
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=collate_fn
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=collate_fn
+    )
+
+    return train_loader, val_loader, test_loader
+
+# NOTE: load_data_mia() is the ONLY public interface for data loading
+# All other scripts must use the DataLoaders returned by load_data_mia()

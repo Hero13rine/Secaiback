@@ -101,16 +101,7 @@ def main():
             from metric.classification.robustness.evaluate_robustness import evaluation_robustness
             evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
     elif evaluation_type == "interpretability":
-        if task == "detection":
-            from metric.object_detection.interpretability.fidelity import run_detection_interpretability
-            run_detection_interpretability(
-                model,
-                estimator,
-                test_loader,
-                evaluation_config=evaluation_config["interpretability"],
-            )
-        else:
-            GradientShap(model, test_loader)
+        GradientShap(model, test_loader)
     elif evaluation_type == "generalization":
         if task == "detection":
             convert_cfg = {
@@ -129,9 +120,16 @@ def main():
                 except Exception as exc:
                     ResultSender.send_log("警告", f"转换数据集标签失败: {exc}")
             # 检测泛化评测
+            _, _, source_loader = load_data(test_root="/app/userData/modelData/data/dataset/dior/test",
+                                                                    batch_size=2,
+                                                                    num_workers=0,
+                                                                    augment_train=False,)
+            _, _, target_loader = load_data(test_root="/app/userData/modelData/data/dataset/dota/test",
+                                                                  batch_size=2,
+                                                                  num_workers=0, )
             dataset_loaders = {
-                "source_train": load_data("/app/userData/modelData/data/dataset/dior/test"),
-                "target_val": load_data("/app/userData/modelData/data/dataset/dota/test"),
+                "source_train": source_loader,
+                "target_test": target_loader,
             }
             evaluate_cross_dataset_generalization(
                 estimator,
@@ -144,11 +142,7 @@ def main():
 
     elif evaluation_type == "safety":
         from metric.object_detection.safety.mia.evaluate_mia import evaluation_mia_detection as evaluate_mia
-        attack_override = evaluation_config["safety"].setdefault("attack_override", {})
-        attack_override.setdefault(
-            "pretrained_model",
-            os.getenv("PRETRAINED_MODEL", "/app/systemData/pretrained_model/fasterrcnn_resnet50_fpn.pth"),
-        )
+
         evaluate_mia(train_loader, val_loader, test_loader, evaluation_config["safety"], model,
                                  model_instantiation_config)
     elif evaluation_type == "fairness":

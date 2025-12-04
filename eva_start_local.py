@@ -88,9 +88,20 @@ def main():
                     ResultSender.send_log("警告", f"转换 DOTA 标签失败: {exc}")
             else:
                 ResultSender.send_log("提示", "未配置 DOTA 转换路径，跳过标签转换")
+        _, _, source_train_loader = load_data(
+            test_root="/wkm/data/dior/test",
+            batch_size=2,
+            num_workers=0,
+            augment_train=False,
+        )
+        _, _, target_test_loader = load_data(
+            test_root="/wkm/data/dota_dior/test",
+            batch_size=2,
+            num_workers=0,
+        )
         dataset_loaders = {
-            "source_train": load_data("/wkm/data/dior/test/test"),
-            "target_val": load_data("/wkm/data/dota_dior/test"),
+            "source_train": source_train_loader,
+            "target_test": target_test_loader,
         }
         evaluate_cross_dataset_generalization(estimator, dataset_loaders, evaluation_config["generalization"].get("generalization_testing"))    
     elif evaluation_type == "fairness":
