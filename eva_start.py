@@ -86,12 +86,14 @@ def main():
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
+    #基础维度
     if task == "detection":
         from metric.object_detection.basic.basic import cal_basic
     else:
         from metric.classification.basic.basic import cal_basic
     if evaluation_type == "basic":
         cal_basic(estimator, test_loader, evaluation_config["basic"])
+    #鲁棒性维度
     elif evaluation_type == "robustness":
         if task == "detection":
             detection_evaluation_robustness(
@@ -103,6 +105,7 @@ def main():
         else:
             from metric.classification.robustness.evaluate_robustness import evaluation_robustness
             evaluation_robustness(test_loader, estimator, evaluation_config["robustness"])
+    #可解释性维度
     elif evaluation_type == "interpretability":
         if task == "detection":
             from metric.object_detection.interpretability.fidelity import run_detection_interpretability
@@ -114,6 +117,7 @@ def main():
             )
         else:
             GradientShap(model, test_loader)
+    #泛化性维度
     elif evaluation_type == "generalization":
         if task == "detection":
             convert_cfg = {
@@ -151,12 +155,17 @@ def main():
         else:
             # 分类泛化评测
             evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
-
+    #安全性维度
     elif evaluation_type == "safety":
-        from metric.object_detection.safety.mia.evaluate_mia import evaluation_mia_detection as evaluate_mia
+        if task == "detection":
+            from metric.object_detection.safety.mia.evaluate_mia import evaluation_mia_detection as evaluate_mia
 
-        evaluate_mia(train_loader, val_loader, test_loader, evaluation_config["safety"], model,
-                                 model_instantiation_config)
+            evaluate_mia(train_loader, val_loader, test_loader, evaluation_config["safety"], model,
+                                     model_instantiation_config)
+        else:
+            from metric.classification.safety.membershipinference.evaluate_mia import evaluate_mia
+            evaluate_mia(train_loader, test_loader, estimator, evaluation_config["safety"]["membership_inference"])
+    #公平性维度
     elif evaluation_type == "fairness":
             if task == "detection":
                 from metric.object_detection.fairness import evaluate_fairness_detection
