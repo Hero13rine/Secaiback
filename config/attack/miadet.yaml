@@ -17,7 +17,7 @@ parameters:
     SHADOW_LR: 0.001
     SHADOW_WEIGHT_DECAY: 0.0001
     SHADOW_USE_PRETRAINED: true
-    PRETRAINED_MODEL: null
+    PRETRAINED_MODEL: "/app/systemData/pretrained_model/fasterrcnn_resnet50_fpn.pth"
 
     ATTACK_EPOCHS: 5
     ATTACK_BATCH_SIZE: 64
