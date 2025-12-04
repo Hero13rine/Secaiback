@@ -57,16 +57,16 @@ model:
 # 只提供你打算运行的部分；其他部分可以保持为空列表或字典
 evaluation:
   basic:
-    performance_testing:               # 基础性能测试
-      metrics:                         # 性能测试指标列表
-        # (det_optional)
-        - map/map_50/accuracy/map50/map@50  # mAP （任何形式传入都可以）
-        #- map_5095                    # mAP在不同IoU阈值下的平均值
-        - per_class_ap                 # 每个类别的平均精度
-        - precision                    # 精确率
-        - recall                       # 召回率
+      performance_testing:               # 基础性能测试
+        metrics:                         # 性能测试指标列表
+          # (det_optional)
+          - map/map_50/accuracy/map50/map@50  # mAP （任何形式传入都可以）
+          #- map_5095                    # mAP在不同IoU阈值下的平均值
+          - per_class_ap                 # 每个类别的平均精度
+          - precision                    # 精确率
+          - recall                       # 召回率
       performance_testing_config:      # 性能测试配置参数
-        -
+        {}
   robustness:
     adversarial:                       # adversarial robustness
       metrics:                         # metrics requested for adversarial testing
