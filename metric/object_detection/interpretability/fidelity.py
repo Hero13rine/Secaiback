@@ -44,7 +44,7 @@ else:
 
 
 DEFAULT_INTERPRETABILITY_PARAMETER_CONFIG = str(
-    Path(__file__).resolve().parents[4] / "config/attack/interpretability.yaml"
+    Path(__file__).resolve().parents[3] / "config/attack/interpretability.yaml"
 )
 
 @dataclass
