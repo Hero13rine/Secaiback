@@ -43,8 +43,9 @@ else:
     ResultSender = RemoteSender
 
 
-DEFAULT_INTERPRETABILITY_PARAMETER_CONFIG = Path("config/attack/interpretability.yaml")
-
+DEFAULT_INTERPRETABILITY_PARAMETER_CONFIG = str(
+    Path(__file__).resolve().parents[4] / "config/attack/interpretability.yaml"
+)
 
 @dataclass
 class _FidelityRecord:
