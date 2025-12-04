@@ -78,8 +78,11 @@ def main():
     # 5.加载数据
     if evaluation_type == "safety":
         train_loader, val_loader, test_loader = load_data()
+    elif evaluation_type == "robustness":
+        from load_dataset import load_data_robustness
+        test_loader = load_data_robustness()
     else:
-        test_loader = load_data()
+        _, _, test_loader = load_data()
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
