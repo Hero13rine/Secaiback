@@ -36,6 +36,18 @@ def _canonical_metric_name(name: Any) -> Any:
 def _normalize_metrics_request(metrics) -> Tuple[List[str], Dict]:
     """Extract metric names and auxiliary config from user configuration."""
 
+    def _extract_names(candidate: Any) -> List[str]:
+        if not candidate:
+            return []
+        if isinstance(candidate, str):
+            return [candidate]
+        if isinstance(candidate, dict):
+            inner = candidate.get("metrics")
+            if inner:
+                return _extract_names(inner)
+            return []
+        return list(candidate)
+
     if metrics is None:
         return [], {}
 
@@ -43,24 +55,31 @@ def _normalize_metrics_request(metrics) -> Tuple[List[str], Dict]:
     names: List[str] = []
 
     if isinstance(metrics, dict):
-        # 优先处理与之前版本兼容的键
-        candidate_lists = [
-            metrics.get("performance_testing"),
-            metrics.get("basic"),
-            metrics.get("metrics"),
-        ]
-        for candidate in candidate_lists:
-            if candidate:
-                if isinstance(candidate, str):
-                    names = [candidate]
-                else:
-                    names = list(candidate)
-                break
-        config = (
-            metrics.get("performance_testing_config")
-            or metrics.get("config")
-            or {}
-        )
+        performance_section = metrics.get("performance_testing")
+        if isinstance(performance_section, dict):
+            names = _extract_names(performance_section.get("metrics"))
+            config = (
+                performance_section.get("performance_testing_config")
+                or performance_section.get("config")
+                or metrics.get("performance_testing_config")
+                or metrics.get("config")
+                or {}
+            )
+        else:
+            candidate_lists = [
+                metrics.get("performance_testing"),
+                metrics.get("basic"),
+                metrics.get("metrics"),
+            ]
+            for candidate in candidate_lists:
+                names = _extract_names(candidate)
+                if names:
+                    break
+            config = (
+                metrics.get("performance_testing_config")
+                or metrics.get("config")
+                or {}
+            )
     elif isinstance(metrics, (list, tuple, set)):
         names = list(metrics)
     else:
