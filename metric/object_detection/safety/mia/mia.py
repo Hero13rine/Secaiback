@@ -743,7 +743,7 @@ def attack_target_model(config, target_member_imgs, target_nonmember_imgs, targe
 
             if plot_roc_curve(target_true_labels, target_pred_scores, roc_filename_rel):
                 ResultSender.send_log("进度", f"ROC曲线已保存到: {roc_filename_rel}")
-                ResultSender.send_result("ROC Curve", roc_filename_abs)
+                ResultSender.send_result("ROC_Curve", roc_filename_abs)
         except Exception as roc_error:
             ResultSender.send_log("错误", f"ROC曲线生成失败: {roc_error}")
 
