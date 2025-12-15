@@ -18,22 +18,19 @@ from metric.object_detection.generaliazation.generaliazation import (
     evaluate_cross_dataset_generalization,
 )
 from utils.convert import convert_with_config
-
-
-# 将目标路径添加到系统路径
-sys.path.append('/app/userData/modelData/')
-sys.path.append('/app/systemData/database_code/')
 # from update_table import update
 
 from estimator import EstimatorFactory
 from utils import load_config
 from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
-from load_dataset import load_data
+from utils.load_dataset import load_dataset
 
 
 def main():
-
+    # 将目标路径添加到系统路径
+    sys.path.append('/app/userData/modelData/')
+    sys.path.append('/app/systemData/database_code/')
     # 0.0获取当前 Pod 名称
     pod_name = os.getenv('HOSTNAME')  # 获取 Pod 名称（例如: 1242343443-1880539772613976065-basic）
 
@@ -53,8 +50,12 @@ def main():
     ResultSender.send_log("进度", "配置文件已加载完毕")
 
     # 2.初始化模型
-    model = load_model(model_instantiation_config["model_path"], model_instantiation_config["model_name"]
-                       , model_instantiation_config["weight_path"], model_instantiation_config["parameters"])
+    model = load_model(
+        model_instantiation_config["model_path"],
+        model_instantiation_config["model_name"],
+        model_instantiation_config["weight_path"],
+        model_instantiation_config["parameters"]
+    )
     ResultSender.send_log("进度", "模型初始化完成")
 
     # 3.获取优化器和损失函数
@@ -71,32 +72,32 @@ def main():
         model=model,
         loss=loss,
         optimizer=optimizer,
-        config=model_estimator_config
+        config=model_estimator_config,
     )
     ResultSender.send_log("进度", "估计器已生成")
 
     # 5.加载数据
     if task == "detection":
         if evaluation_type == "safety":
-            train_loader, val_loader, test_loader = load_data()
+            train_loader, val_loader, test_loader = load_dataset()
         else:
-            _, _, test_loader = load_data()
+            _, _, test_loader = load_dataset()
     else:
         if evaluation_type == "safety":
-            train_loader, test_loader = load_data()
+            train_loader, test_loader = load_dataset()
         else:
-            _, test_loader = load_data()
+            _, test_loader = load_dataset()
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
-    #基础维度
+    # 基础维度
     if task == "detection":
         from metric.object_detection.basic.basic import cal_basic
     else:
         from metric.classification.basic.basic import cal_basic
     if evaluation_type == "basic":
         cal_basic(estimator, test_loader, evaluation_config["basic"])
-    #鲁棒性维度
+    # 鲁棒性维度
     elif evaluation_type == "robustness":
         if task == "detection":
             detection_evaluation_robustness(
@@ -139,11 +140,11 @@ def main():
                 except Exception as exc:
                     ResultSender.send_log("警告", f"转换数据集标签失败: {exc}")
             # 检测泛化评测
-            _, _, source_loader = load_data(test_root="/app/userData/modelData/data/dataset/dior/test",
+            _, _, source_loader = load_dataset(test_root="/app/userData/modelData/data/dataset/dior/test",
                                                                     batch_size=2,
                                                                     num_workers=0,
                                                                     augment_train=False,)
-            _, _, target_loader = load_data(test_root="/app/userData/modelData/data/dataset/dota/test",
+            _, _, target_loader = load_dataset(test_root="/app/userData/modelData/data/dataset/dota/test",
                                                                   batch_size=2,
                                                                   num_workers=0, )
             dataset_loaders = {

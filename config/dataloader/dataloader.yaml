@@ -1,0 +1,10 @@
+dataloader:
+  definition: load_dataset.py
+  function: load_data
+  params:
+    train_root: ./data/dataset/dior/train
+    val_root: ./data/dataset/dior/val
+    test_root: ./data/dataset/dior/test
+    batch_size: 2
+    num_workers: 0
+    augment_train: true
