@@ -10,7 +10,7 @@ import torchvision.transforms as transforms
 
 from estimator import EstimatorFactory
 from metric.object_detection.fairness import evaluate_fairness_detection
-from method import load_config
+from utils import load_config
 from model import load_model
 from tests.fasterrcnn.load_dataset import load_data
 

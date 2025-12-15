@@ -1,14 +1,13 @@
 """Entry point for running robustness smoke tests on detection models."""
 from __future__ import annotations
 
-import importlib
 from typing import Sequence
 from torch import optim
 import torch
 from torch.utils.data import DataLoader
 
 from estimator import EstimatorFactory
-from method.load_config import load_config
+from utils.load_config import load_config
 from data.dummy_detection_dataset import DummyDetectionDataset
 
 

@@ -6,7 +6,7 @@ import torch
 from torch import optim
 
 from estimator import EstimatorFactory
-from method import load_config
+from utils import load_config
 from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
 from fasterrcnn_test.load_dataset import load_data

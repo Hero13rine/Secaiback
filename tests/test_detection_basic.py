@@ -10,7 +10,7 @@ from torch import optim
 from torch.utils.data import DataLoader
 
 from estimator import EstimatorFactory
-from method.load_config import load_config
+from utils.load_config import load_config
 from data.dummy_detection_dataset import DummyDetectionDataset
 from metric.object_detection.basic.detection import cal_object_detection
 

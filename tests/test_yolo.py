@@ -7,16 +7,12 @@
 3. 确保模型和数据在正确的设备上 (GPU/CPU)。
 """
 
-import numpy as np
 import torch
-import os
-import sys
-from typing import List, Dict, Any, Optional
 
 # --- 假设导入的依赖模块（需要确保这些模块在您的环境中存在） ---
 # 请根据您的实际文件结构确保以下导入路径正确：
 from estimator import EstimatorFactory
-from method.load_config import load_config
+from utils.load_config import load_config
 from metric.object_detection.basic.detection import cal_object_detection
 from model.load_yolo_model import load_yolo_model
 from data.load_yolo_dataset import load_dior # 您的 DIOR 数据加载器
@@ -26,7 +22,7 @@ YOLOV7_UTILS_AVAILABLE = True
 
 def main():
     # 0、定义关键参数
-    evaluation_path = "config/user/model_pytorch_det_yolo.yaml"
+    evaluation_path = "../config/user/model_pytorch_det_yolo.yaml"
     
     # 1.加载配置文件
     user_config = load_config(evaluation_path)

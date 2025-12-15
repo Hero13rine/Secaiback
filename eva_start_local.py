@@ -13,7 +13,7 @@ from torch import optim
 # from metric.classification.fairness.fairness_metrics import calculate_fairness_metrics
 
 from estimator import EstimatorFactory
-from method import load_config
+from utils import load_config
 from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
 from tests.fasterrcnn.load_dataset import load_data

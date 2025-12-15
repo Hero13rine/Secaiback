@@ -11,7 +11,7 @@ from metric.object_detection.robustness import (
     CorruptionEvaluationResult,
     evaluate_corruption_robustness,
 )
-from method import load_config
+from utils import load_config
 from model import load_model
 from fasterrcnn_test.load_dataset import load_data
 
@@ -115,7 +115,7 @@ def main(
 
     # 5.加载数据
     print("进度: 加载测试数据...")
-    test_loader = load_data("fasterrcnn_test/test")
+    test_loader = load_data("../fasterrcnn_test/test")
     print("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测

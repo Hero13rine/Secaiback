@@ -2,16 +2,9 @@
 测试fasterrcnn的评估流程
 """
 
-import os
-import sys
-
-import numpy as np
 import torch
-from torch import optim
 
-from estimator import EstimatorFactory
-from method.load_config import load_config
-from data.dummy_detection_dataset import DummyDetectionDataset
+from utils.load_config import load_config
 from metric.object_detection.basic.detection import cal_object_detection
 # from update_table import update
 
@@ -25,7 +18,7 @@ from fasterrcnn_test.load_dataset import load_data
 
 def main():
     # 0、定义关键参数
-    evaluation_path = "config/user/model_pytorch_det_fasterrcnn.yaml"
+    evaluation_path = "../config/user/model_pytorch_det_fasterrcnn.yaml"
     # 1.加载配置文件
     user_config = load_config(evaluation_path)
     model_instantiation_config = user_config["model"]["instantiation"]
@@ -54,7 +47,7 @@ def main():
     print("进度", "估计器已生成")
 
     # 5.加载数据
-    test_loader = load_data("fasterrcnn_test/test")
+    test_loader = load_data("../fasterrcnn_test/test")
     print("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测

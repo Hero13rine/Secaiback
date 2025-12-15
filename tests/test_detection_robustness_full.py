@@ -12,7 +12,7 @@ from metric.object_detection.robustness import (
     CorruptionEvaluationResult,
     evaluation_robustness,
 )
-from method import load_config
+from utils import load_config
 from model import load_model
 from fasterrcnn_test.load_dataset import load_data
 
@@ -167,7 +167,7 @@ def main(
     )
 
     print("进度: 加载测试数据...")
-    test_loader = load_data("fasterrcnn_test/test")
+    test_loader = load_data("../fasterrcnn_test/test")
     print("进度", "数据集已加载")
 
     print("进度: 准备鲁棒性评估配置...")

@@ -1,31 +1,41 @@
-from __future__ import annotations
+"""入口脚本：运行检测模型的成员推理攻击评测。"""
+import os
+import sys
+
+import numpy as np
 import torch
 from torch import optim
-from metric.object_detection.robustness import evaluation_robustness
+
 from estimator import EstimatorFactory
-from method import load_config
+from utils import load_config
 from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
-from fasterrcnn_test.load_dataset import load_data
-from utils.sender import ResultSender
+from fasterrcnn_test.load_mia_dataset import load_data
+from utils.sender import ConsoleResultSender as ResultSender
+from metric.object_detection.safety.mia import evaluation_mia_detection
+
 
 def main():
     user_id = "local_user"  # 本地调试时使用固定的用户ID
     model_id = "local_model"  # 本地调试时使用固定的模型ID
-    evaluation_type = "robustness"  # 本地调试时使用固定的评测维度
-    evaluation_path = "config/user/model_pytorch_det_fasterrcnn_robustness.yaml"  # 本地调试时使用本地配置文件路径
+    evaluation_type = "fairness"  # 本地调试时使用固定的评测维度
+    evaluation_path = "secai-common/config/user/model_pytorch_det_mia.yaml"  # 本地调试时使用本地配置文件路径
 
     # 1.加载配置文件
     user_config = load_config(evaluation_path)
     model_instantiation_config = user_config["model"]["instantiation"]
     model_estimator_config = user_config["model"]["estimator"]
     evaluation_config = user_config["evaluation"]
-    # task = model_estimator_config.get("task", "calssification")
+    task = model_estimator_config.get("task", "classification")
     ResultSender.send_log("进度", "配置文件已加载完毕")
 
     # 2.初始化模型
-    model = load_model(model_instantiation_config["model_path"], model_instantiation_config["model_name"]
-                       , model_instantiation_config["weight_path"], model_instantiation_config["parameters"])
+    model = load_model(
+        model_instantiation_config["model_path"],
+        model_instantiation_config["model_name"],
+        model_instantiation_config["weight_path"],
+        model_instantiation_config["parameters"],
+    )
     ResultSender.send_log("进度", "模型初始化完成")
 
     # 3.获取优化器和损失函数
@@ -39,27 +49,19 @@ def main():
         model=model,
         loss=loss,
         optimizer=optimizer,
-        config=model_estimator_config
+        config=model_estimator_config,
     )
     ResultSender.send_log("进度", "估计器已生成")
 
     # 5.加载数据
-    test_loader = load_data("fasterrcnn_test/test")
+    train_loader, val_loader, test_loader = load_data()
     ResultSender.send_log("进度", "数据集已加载")
 
     # 6.根据传入的评测类型进行评测
-    if evaluation_type == "robustness":
-         _ = evaluation_robustness(
-             estimator=estimator,
-             test_data=test_loader,
-             config=evaluation_config,
-             batch_size=64,)
-    # elif evaluation_type == "interpretability":
-    #     GradientShap(model, test_loader)
-    # elif evaluation_type == "generalization":
-    #     evaluate_generalization(test_loader, estimator, evaluation_config["generalization"]["generalization_testing"])
+    evaluation_mia_detection(train_loader, val_loader, test_loader, evaluation_config["safety"], model, model_instantiation_config)
 
     ResultSender.send_log("进度", "评测结束")
+
 
 if __name__ == "__main__":
     try:

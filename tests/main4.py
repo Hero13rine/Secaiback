@@ -2,11 +2,11 @@ import torch
 from torch import optim
 
 from estimator import EstimatorFactory
-from method import evaluate, load_config
+from method import evaluate
 from model import load_model
 from data.load_dataset import load_cifar
 from attack import AttackFactory
-
+from utils import load_config
 
 # v4:模型代码，模型权重，模型配置文件位置适配k8s的pod目录
 def main():
