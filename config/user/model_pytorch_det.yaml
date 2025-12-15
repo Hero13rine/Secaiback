@@ -1,17 +1,27 @@
 model:
   instantiation:
-    model_module: "model.net.dummy_detector"
-    model_class: "DummyObjectDetectionModel"
+    model_path: "fasterrcnn_test/model.py"
+    weight_path: "fasterrcnn_test/dior_clean_best.pt"
+    model_name: "TorchvisionDetector"
     parameters:
-      num_classes: 3
+      "num_classes": 20
+      "network": "fasterrcnn"
+      "pretrained": True
+      "trainable_backbone_layers": 3
   estimator:
     framework: "pytorch"
     task: "detection"
     parameters:
-      input_shape: [3, 32, 32]
-      nb_classes: 10
-      clip_values: [ 0,1 ]
+      input_shape: [3, -1, -1]
+      clip_values: [0, 1]
+      device: "cuda"
       device_type: "gpu"
+      batch_size: 1
 evaluation:
-    basic: ["accuracy",'precision']
-    robustness: ["fgsm", "pgd"]
+  basic:
+    performance_testing:
+      metrics:
+      - precision
+      - per_class_ap
+      - recall
+      - map

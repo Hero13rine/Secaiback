@@ -24,7 +24,7 @@ from estimator import EstimatorFactory
 from utils import load_config
 from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
-from utils.load_dataset import load_dataset
+from utils.load_dataloader import load_dataloader
 
 
 def main():
@@ -77,6 +77,7 @@ def main():
     ResultSender.send_log("进度", "估计器已生成")
 
     # 5.加载数据
+    load_dataset = load_dataloader("./load_dataset.py")
     if task == "detection":
         if evaluation_type == "safety":
             train_loader, val_loader, test_loader = load_dataset()

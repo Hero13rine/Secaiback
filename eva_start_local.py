@@ -16,7 +16,7 @@ from estimator import EstimatorFactory
 from utils import load_config
 from model import load_model
 # 修改导入语句，直接从 load_dataset 导入
-from tests.fasterrcnn.load_dataset import load_data
+from fasterrcnn_test.load_dataset import load_data
 from utils.sender import ConsoleResultSender as ResultSender
 from utils.convert import convert_with_config
 from metric.object_detection.generaliazation.generaliazation import evaluate_cross_dataset_generalization
@@ -25,7 +25,7 @@ def main():
     user_id = "local_user"  # 本地调试时使用固定的用户ID
     model_id = "local_model"  # 本地调试时使用固定的模型ID
     evaluation_type = "generalization"  # 本地调试时使用固定的评测维度 
-    evaluation_path = "/wkm/secai/secai-common/config/user/model_pytorch_det_fasterrcnn_fairness.yaml"  # 本地调试时使用本地配置文件路径
+    evaluation_path = "config/user/model_pytorch_det.yaml"  # 本地调试时使用本地配置文件路径
 
     # 1.加载配置文件
     user_config = load_config(evaluation_path)
