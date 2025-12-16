@@ -4,7 +4,7 @@ import torch
 from torchvision import transforms
 
 from attack import AttackFactory
-from corruptions import (
+from .corruptions import (
     gaussian_noise, shot_noise, impulse_noise, speckle_noise,
     gaussian_blur, glass_blur, defocus_blur, motion_blur, zoom_blur,
     fog, frost, snow, spatter, contrast, brightness, saturate,

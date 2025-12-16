@@ -23,7 +23,7 @@ def main():
     user_id = "local_user"  # 本地调试时使用固定的用户ID
     model_id = "local_model"  # 本地调试时使用固定的模型ID
     evaluation_type = "basic"  # 本地调试时使用固定的评测维度
-    evaluation_path = "config/user/model_pytorch_det.yaml"  # 本地调试时使用本地配置文件路径
+    evaluation_path = "../config/user/model_pytorch_det.yaml"  # 本地调试时使用本地配置文件路径
 
     # 1.加载配置文件
     user_config = load_config(evaluation_path)
@@ -61,7 +61,7 @@ def main():
     ResultSender.send_log("进度", "估计器已生成")
 
     # 5.加载数据
-    load_dataset = load_dataloader("./load_dataset.py")
+    load_dataset = load_dataloader("../load_dataset.py")
     test_loader = load_dataset()
     ResultSender.send_log("进度", "数据集已加载")
 
