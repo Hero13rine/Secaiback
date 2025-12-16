@@ -12,7 +12,7 @@ class DataLoaderLoadError(RuntimeError):
 
 def load_dataloader(
     dataloader_def_path: str | Path,
-    func_name: str = "load_data_robustness",
+    func_name: str = "load_data",
 ) -> Callable[..., Any]:
     """
     Dynamically load a dataloader function from an external Python file.

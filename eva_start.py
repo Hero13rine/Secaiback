@@ -40,7 +40,7 @@ def main():
     model_id = parts[1]  # 第二部分是模型ID
     evaluation_type = parts[2]  # 第三部分是评测维度，如"basic"，"robustness"
     evaluation_path = "/app/userData/modelData/evaluationConfigs/" + "evaluationConfig" + ".yaml"
-
+    dataloader_path = "/app/userData/modelData/load_dataset.py"
     # 1.加载配置文件
     user_config = load_config(evaluation_path)
     model_instantiation_config = user_config["model"]["instantiation"]
@@ -77,7 +77,8 @@ def main():
     ResultSender.send_log("进度", "估计器已生成")
 
     # 5.加载数据
-    load_dataset = load_dataloader("./load_dataset.py")
+    load_dataset = load_dataloader(dataloader_def_path=dataloader_path,
+                                   func_name="load_data")
     if task == "detection":
         if evaluation_type == "safety":
             train_loader, val_loader, test_loader = load_dataset()
