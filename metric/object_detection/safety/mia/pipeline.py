@@ -15,7 +15,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Mapping, List
 from pathlib import Path
-from method import load_config
+from utils import load_config
 
 from .atk import train_attack_with_config
 from .mia import evaluate_attack_with_config
