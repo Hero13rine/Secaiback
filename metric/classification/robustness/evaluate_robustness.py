@@ -10,7 +10,7 @@ from attack import AttackFactory
 from utils.SecAISender import ResultSender
 from utils.visualize import denormalize  # 仍保留原反归一化函数
 
-from method.corruptions import (
+from corruptions import (
     gaussian_noise, shot_noise, impulse_noise, speckle_noise,
     gaussian_blur, glass_blur, defocus_blur, motion_blur, zoom_blur,
     fog, frost, snow, spatter, contrast, brightness, saturate,
