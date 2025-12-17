@@ -36,7 +36,7 @@ def cal_basic(estimator, test_loader, metrics):
             # 收集结果（注意labels需要展平为1维）
             all_preds.extend(preds)
             all_labels.extend(labels_np.flatten())  # 确保labels是1维列表
-        print(all_preds, all_labels)
+        #print(all_preds, all_labels)
 
         ResultSender.send_log("进度", "网络输出收集完成")
         ResultSender.send_log("进度", "开始计算"+str(metrics.get('performance_testing', [])))
