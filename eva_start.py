@@ -82,6 +82,10 @@ def main():
     if task == "detection":
         if evaluation_type == "safety":
             train_loader, val_loader, test_loader = load_dataset()
+        elif evaluation_type == "robustness":
+            load_dataset = load_dataloader(dataloader_def_path=dataloader_path,
+                                       func_name="load_data_robustness")
+            test_loader = load_dataset()
         else:
             _, _, test_loader = load_dataset()
     else:
@@ -188,5 +192,12 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except (KeyError, FileNotFoundError, ValueError) as e:
+        ResultSender.send_log("错误", f"配置或输入错误: {e}")
+        sys.exit(2)
+    except RuntimeError as e:
+        ResultSender.send_log("错误", f"运行时错误: {e}")
+        sys.exit(3)
     except Exception as e:
         ResultSender.send_log("错误", str(e))
+        sys.exit(1)
